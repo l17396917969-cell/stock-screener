@@ -4,9 +4,43 @@ import pandas as pd
 import numpy as np
 import time
 import logging
+from datetime import datetime, timedelta
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# ── yfinance 限流控制 ─────────────────────────────────────────
+_yf_last_request_time = 0
+_yf_rate_limit_seconds = 2.0  # 每次请求间隔2秒，防止被限流
+_yf_rate_limited_until = None  # 如果被限流，记录恢复时间
+
+def _yf_rate_limit_wait():
+    """确保 yfinance 请求间隔，防止被限流"""
+    global _yf_last_request_time, _yf_rate_limited_until
+    
+    # 检查是否还在限流中
+    if _yf_rate_limited_until and datetime.now() < _yf_rate_limited_until:
+        wait_seconds = (_yf_rate_limited_until - datetime.now()).total_seconds()
+        logger.info(f"yfinance rate limited, waiting {wait_seconds:.1f}s...")
+        time.sleep(wait_seconds)
+    
+    # 确保请求间隔
+    now = time.time()
+    elapsed = now - _yf_last_request_time
+    if elapsed < _yf_rate_limit_seconds:
+        time.sleep(_yf_rate_limit_seconds - elapsed)
+    
+    _yf_last_request_time = time.time()
+
+def _check_yf_rate_limit(error_msg: str) -> bool:
+    """检查是否触发限流，如果是设置冷却时间"""
+    global _yf_rate_limited_until
+    error_lower = error_msg.lower()
+    if 'rate limit' in error_lower or 'too many request' in error_lower:
+        _yf_rate_limited_until = datetime.now() + timedelta(minutes=5)
+        logger.warning("yfinance rate limit detected, cooling down for 5 minutes")
+        return True
+    return False
 
 # ── 重试装饰器 ────────────────────────────────────────────────
 def retry_on_failure(retries=3, delay=2):
@@ -342,6 +376,7 @@ def get_money_flow_data(code: str) -> dict:
 @retry_on_failure(retries=2)
 def get_index_data(symbol="000001.SS"):
     """获取指数数据用于 RPS 计算"""
+    _yf_rate_limit_wait()  # 添加限流等待
     t = yf.Ticker(symbol)
     return t.history(period="1mo")
 
@@ -349,13 +384,29 @@ def get_stock_data_yf(code: str, index_hist=None) -> dict | None:
     """
     通过 yfinance 获取单只股票 19 个指标所需的原始数据，并计算部分技术指标。
     """
+    _yf_rate_limit_wait()  # 添加限流等待，避免被限流
+    
     ticker = _to_yf_symbol(code)
     try:
         t = yf.Ticker(ticker)
-        info = t.info or {}
+        
+        # 先检查是否被限流
+        try:
+            info = t.info or {}
+        except Exception as e:
+            if _check_yf_rate_limit(str(e)):
+                return None
+            raise
 
         # 始终优先获取 K线历史，若 K线不足 60 天则放弃
-        hist = t.history(period="1y") 
+        try:
+            hist = t.history(period="1y") 
+        except Exception as e:
+            if _check_yf_rate_limit(str(e)):
+                return None
+            logger.debug(f"{code} hist fetch error: {e}")
+            return None
+            
         if hist is None or len(hist) < 60:
             logger.debug(f"{code} hist is None or too short: {len(hist) if hist is not None else 0}")
             return None

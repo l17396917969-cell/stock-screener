@@ -372,10 +372,12 @@ def get_watchlist():
                 else:
                     info['current_price'] = info['pct_change'] = None
         
-        # 获取美股实时数据 (需要代理)
+        # 获取美股实时数据 (需要代理，添加限流)
         if us_codes:
             import yfinance as yf
+            from core.data_fetcher import _yf_rate_limit_wait, _check_yf_rate_limit
             for code, info in us_codes.items():
+                _yf_rate_limit_wait()  # 添加限流等待
                 try:
                     ticker = yf.Ticker(code)
                     live = ticker.fast_info
@@ -387,6 +389,7 @@ def get_watchlist():
                     else:
                         info['current_price'] = info['pct_change'] = None
                 except Exception as e:
+                    _check_yf_rate_limit(str(e))
                     logger.warning(f"yfinance failed for {code}: {e}")
                     info['current_price'] = info['pct_change'] = None
     except Exception as e:
