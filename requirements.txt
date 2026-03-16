@@ -8,3 +8,5 @@ Flask-Login>=0.6.3
 python-dotenv>=1.0.1
 cryptography>=42.0.5
 yfinance>=0.2.37
+google-genai>=1.0.0
+baostock>=0.8.9
