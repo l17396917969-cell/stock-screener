@@ -16,7 +16,7 @@ SCRENNER_CONFIG = {
     "GEMINI_API_KEY": os.environ.get('GEMINI_API_KEY') or '', # Google Gemini API 密钥
     "GEMINI_MODEL": "gemini-3.1-pro-preview-customtools", # 支持 Google Search grounding
     "DS_API_KEY": os.environ.get('DEEPSEEK_API_KEY') or '', # DeepSeek API 密钥
-    "DS_MODEL": "deepseek-reasoner", # R1深度思考；改为 deepseek-chat 可用 V3（更快）
+    "DS_MODEL": "deepseek-chat", # 改为 deepseek-chat 可能知识更新鲜
 }
 
 # 指标评分权重总和100分 (v2.0 - 19指标体系)
