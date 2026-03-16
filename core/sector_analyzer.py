@@ -16,15 +16,15 @@ from .data_fetcher import get_market_overview, get_sector_snapshot
 def _build_prompt(market_data: dict, sectors_data: list) -> str:
     today = datetime.now().strftime('%Y年%m月%d日')
     
-    sectors_table = "| 行业板块 | 当日涨跌幅 | 上涨家数 | 领涨股票 | 领涨涨跌幅 |\n|---|---|---|---|---|\n"
-    if sectors_data:
+    # 检查数据源是否可用
+    has_real_time_data = market_data is not None and sectors_data is not None and len(sectors_data) > 0
+    
+    if has_real_time_data:
+        # 使用真实数据
+        sectors_table = "| 行业板块 | 当日涨跌幅 | 上涨家数 | 领涨股票 | 领涨涨跌幅 |\n|---|---|---|---|---|\n"
         for s in sectors_data:
             sectors_table += f"| {s['name']} | {s['pct_change']}% | {s['up_count']} | {s['leader']} | {s['leader_pct']}% |\n"
-    else:
-        sectors_table += "数据获取失败\n"
         
-    market_str = "无"
-    if market_data:
         market_str = (
             f"- 大盘指数表现：上证指数 {market_data.get('sh_index', '')}、"
             f"深成指 {market_data.get('sz_index', '')}、创业板指 {market_data.get('cy_index', '')}\n"
@@ -32,10 +32,23 @@ def _build_prompt(market_data: dict, sectors_data: list) -> str:
             f"涨停家数 {market_data.get('limit_up', 0)}，跌停家数 {market_data.get('limit_down', 0)}\n"
             f"- 两市成交额：{market_data.get('total_amount', 0)} 亿元"
         )
+        data_source_note = "（以下数据来源于实时行情接口）"
+    else:
+        # AkShare 不可用，提示词让 DeepSeek 依靠自身知识
+        sectors_table = "（暂无实时板块数据，请根据你的知识进行分析）"
+        market_str = (
+            "（实时行情接口暂时无法获取，请基于你对当前A股市场的了解进行分析）\n"
+            "你可以根据以下角度进行分析：\n"
+            "1. 近期政策动向和市场热点\n"
+            "2. 资金流向和成交量变化\n"
+            "3. 热门概念和题材\n"
+            "4. 机构持仓和北向资金动向"
+        )
+        data_source_note = "（以下分析基于AI大模型知识库，如与实际有出入请以实际行情为准）"
         
-    return f"""### A股热门板块分析任务 (截至 {today})
+    return f"""### A股热门板块分析任务 (截至 {today}) {data_source_note}
 
-请根据以下输入数据，对当前A股市场的热点板块进行专业分析。你需要基于“短期热度+中期趋势+长期确定性”的三维框架，筛选出具备持续性的主线板块，并给出具体的投资策略建议。
+请根据以下输入数据，对当前A股市场的热点板块进行专业分析。你需要基于"短期热度+中期趋势+长期确定性"的三维框架，筛选出具备持续性的主线板块，并给出具体的投资策略建议。
 
 #### 【实盘输入数据】
 **一、全市场概况**
@@ -64,7 +77,7 @@ def _build_prompt(market_data: dict, sectors_data: list) -> str:
 [写出仓位配置建议，如核心仓位买什么、卫星仓位买什么]
 
 **第二部分：JSON 机器识别代码（必须放在报告最末尾！）**
-在 Markdown 报告完成后，你必须为报告中所有被评为“强烈关注”和“关注”的板块，凭借你的A股知识库手工列出 **每个板块 30-50只** 代表性主板成分股代码（6位纯数字）。
+在 Markdown 报告完成后，你必须为报告中所有被评为"强烈关注"和"关注"的板块，凭借你的A股知识库手工列出 **每个板块 30-50只** 代表性主板成分股代码（6位纯数字）。
 JSON 必须包裹在 ` ```json ... ``` ` 代码块里！格式严格如下：
 ```json
 {{
@@ -97,6 +110,7 @@ def _call_deepseek(api_key: str, model_name: str, prompt: str) -> str:
             "content": (
                 "你是一位深谙中国A股市场、宏观经济与产业政策的顶尖量化战略科学家。"
                 "你具备完整的A股上市公司代码知识，能够准确给出6位股票代码。"
+                "当实时行情数据不可用时，请基于你的知识库进行分析。"
                 "请输出纯 JSON，不要 Markdown 格式。"
             )
         },
