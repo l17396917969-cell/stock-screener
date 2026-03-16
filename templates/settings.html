@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>个人设置 - 量化审计系统</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #0071e3;
+            --bg: #f5f5f7;
+            --text: #1d1d1f;
+            --border: #d2d2d7;
+            --success: #34c759;
+        }
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 2rem;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: #fff;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 2rem;
+        }
+        h1 { margin: 0; font-size: 1.5rem; }
+        .back-link { color: var(--primary); text-decoration: none; font-size: 0.875rem; }
+        
+        .section {
+            margin-bottom: 2.5rem;
+            padding-bottom: 2rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .section:last-child { border-bottom: none; }
+        .section h2 { margin-top: 0; font-size: 1.125rem; margin-bottom: 0.5rem; color: #1d1d1f; }
+        .section p { font-size: 0.875rem; color: #86868b; margin-bottom: 1.5rem; }
+        
+        .form-group { margin-bottom: 1.25rem; }
+        label { display: block; margin-bottom: 0.4rem; font-size: 0.875rem; font-weight: 500; }
+        input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-sizing: border-box;
+            font-size: 1rem;
+        }
+        input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px rgba(0,113,227,0.1); }
+        
+        .btn {
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+        }
+        .btn-primary { background: var(--primary); color: #fff; }
+        .btn-primary:hover { background: #0062c3; }
+        .btn-outline { background: #fff; border: 1px solid var(--border); color: var(--text); }
+        .btn-outline:hover { background: #f5f5f7; }
+
+        .key-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            margin-top: 0.5rem;
+        }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .status-on { background: var(--success); }
+        .status-off { background: #86868b; }
+        
+        .flash-messages {
+            margin-bottom: 1.5rem;
+            list-style: none;
+            padding: 0;
+        }
+        .flash-messages li {
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+        }
+        .flash-success { background: #e6f4ea; color: #1e8e3e; }
+        .flash-error { background: #fdeded; color: #d93025; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>个人设置</h1>
+            <a href="{{ url_for('index') }}" class="back-link">返回工作台</a>
+        </header>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <ul class="flash-messages">
+              {% for category, message in messages %}
+                <li class="flash-{{ 'success' if category == 'success' else 'error' }}">{{ message }}</li>
+              {% endfor %}
+            </ul>
+          {% endif %}
+        {% endwith %}
+
+        <div class="section">
+            <h2>模型连接 API Key</h2>
+            <p>保存后，系统在进行宏观分析和个股诊断时将自动加载您的 Key，无需每次手动输入。Key 将加密存储在服务器中。</p>
+            
+            <form action="{{ url_for('update_keys') }}" method="POST">
+                <div class="form-group">
+                    <label for="ds_key">DeepSeek API Key</label>
+                    <input type="password" id="ds_key" name="ds_key" placeholder="{{ '已配置 (输入以覆盖)' if has_ds_key else 'sk-...' }}">
+                    <div class="key-status">
+                        <span class="status-dot {{ 'status-on' if has_ds_key else 'status-off' }}"></span>
+                        <span>{{ '已配置' if has_ds_key else '未配置' }}</span>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label for="gemini_key">Gemini API Key (备选)</label>
+                    <input type="password" id="gemini_key" name="gemini_key" placeholder="{{ '已配置 (输入以覆盖)' if has_gemini_key else '输入密钥...' }}">
+                    <div class="key-status">
+                        <span class="status-dot {{ 'status-on' if has_gemini_key else 'status-off' }}"></span>
+                        <span>{{ '已配置' if has_gemini_key else '未配置' }}</span>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">保存 Key 设置</button>
+            </form>
+        </div>
+
+        <div class="section">
+            <h2>账户安全</h2>
+            <p>建议定期修改您的登录密码以确保数据安全。</p>
+            
+            <form action="{{ url_for('update_password') }}" method="POST">
+                <div class="form-group">
+                    <label for="current_password">当前密码</label>
+                    <input type="password" id="current_password" name="current_password" required>
+                </div>
+                <div class="form-group">
+                    <label for="new_password">新密码</label>
+                    <input type="password" id="new_password" name="new_password" required>
+                </div>
+                <div class="form-group">
+                    <label for="confirm_password">确认新密码</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required>
+                </div>
+                <button type="submit" class="btn btn-outline">更新密码</button>
+            </form>
+        </div>
+
+        {% if current_user.must_change_password %}
+        <div style="background: #fff8e1; border: 1px solid #ffca28; padding: 1rem; border-radius: 8px; margin-top: 1rem; font-size: 0.875rem;">
+            ⚠️ <strong>提示：</strong> 您正在使用初始密码或系统重置的密码，请立即修改密码以解除限制。
+        </div>
+        {% endif %}
+    </div>
+</body>
+</html>
