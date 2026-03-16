@@ -80,7 +80,8 @@ def _build_prompt(market_data: dict, sectors_data: list) -> str:
 
 **第二部分：JSON 机器识别代码（必须放在报告最末尾！）**
 在 Markdown 报告完成后，你必须为报告中所有被评为"强烈关注"和"关注"的板块，凭借你的A股知识库手工列出 **每个板块 30-50只** 代表性主板成分股代码（6位纯数字）。
-JSON 必须包裹在 ` ```json ... ``` ` 代码块里！格式严格如下：
+
+**JSON格式必须严格按以下格式，禁止使用其他格式：**
 ```json
 {{
   "sectors": [
@@ -92,6 +93,7 @@ JSON 必须包裹在 ` ```json ... ``` ` 代码块里！格式严格如下：
   ]
 }}
 ```
+注意：JSON的key必须使用英文"name"、"type"、"stocks"，禁止使用中文！
 """
 
 
@@ -112,8 +114,8 @@ def _call_deepseek(api_key: str, model_name: str, prompt: str) -> str:
             "content": (
                 "你是一位深谙中国A股市场、宏观经济与产业政策的顶尖量化战略科学家。"
                 "你具备完整的A股上市公司代码知识，能够准确给出6位股票代码。"
-                "当实时行情数据不可用时，请基于你的知识库进行分析。"
-                "请输出纯 JSON，不要 Markdown 格式。"
+                "当实时行情数据不可用时，请联网搜索获取最新数据进行分析。"
+                "重要：JSON输出必须使用英文key：sectors, name, type, stocks，不允许使用中文key！"
             )
         },
         {
