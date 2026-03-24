@@ -5,6 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>A股智能量化审计系统 Pro</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config = { theme: { extend: { colors: { primary: "#0066CC", secondary: "#0099AA", base: "#EFF6FF", card: "#FFFFFF" } } } }</script>
     <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}?v=2.0">
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
@@ -21,29 +23,29 @@
             </div>
             
             <div class="header-status">
-                <div id="keyStatusChips" class="status-chips" style="display:flex; gap:0.5rem;">
+                <div id="keyStatusChips" class="status-chips" >
                     <!-- Chips rendered by JS -->
                 </div>
             </div>
 
-            <div class="user-menu" style="position:relative; cursor:pointer; margin-left:auto;">
-                <div class="user-info" style="display:flex; align-items:center; gap:0.75rem; padding:0.5rem 1rem; border-radius:8px; background:var(--bg-base);">
-                    <div style="width:32px; height:32px; border-radius:50%; background:var(--cyan); color:#fff; display:flex; align-items:center; justify-content:center; font-weight:bold;">
+            <div class="user-menu" >
+                <div class="user-info" >
+                    <div >
                         {{ current_user.username[0].upper() }}
                     </div>
-                    <span class="username" style="font-weight:600; font-size:0.9rem;">{{ current_user.username }}</span>
+                    <span class="username" >{{ current_user.username }}</span>
                     {% if current_user.is_admin %}
-                        <span class="admin-badge" style="font-size:0.65rem; background:#000; color:#fff; padding:2px 4px; border-radius:4px;">ADMIN</span>
+                        <span class="admin-badge" >ADMIN</span>
                     {% endif %}
                 </div>
-                <div class="dropdown-menu" style="display:none; position:absolute; top:100%; right:0; background:#fff; box-shadow:var(--shadow-hover); border-radius:8px; border:1px solid var(--border-dim); min-width:160px; z-index:1000; padding:0.5rem 0; margin-top:0.5rem;">
-                    <a href="{{ url_for('settings') }}" style="display:block; padding:0.75rem 1.25rem; color:var(--text-primary); text-decoration:none; font-size:0.9rem;">个人设置</a>
+                <div class="dropdown-menu" >
+                    <a href="{{ url_for('settings') }}" >个人设置</a>
                     {% if current_user.is_admin %}
-                        <a href="{{ url_for('admin_users') }}" style="display:block; padding:0.75rem 1.25rem; color:var(--text-primary); text-decoration:none; font-size:0.9rem;">用户管理</a>
+                        <a href="{{ url_for('admin_users') }}" >用户管理</a>
                     {% endif %}
-                    <hr style="border:none; border-top:1px solid var(--border-dim); margin:0.5rem 0;">
-                    <form action="{{ url_for('auth.logout') }}" method="POST" style="display:block; width:100%;">
-                        <button type="submit" style="display:block; width:100%; text-align:left; border:none; background:none; padding:0.75rem 1.25rem; color:#d93025; cursor:pointer; font-size:0.9rem; font-family:inherit;">退出登录</button>
+                    <hr >
+                    <form action="{{ url_for('auth.logout') }}" method="POST" >
+                        <button type="submit" >退出登录</button>
                     </form>
                 </div>
             </div>
@@ -63,10 +65,10 @@
                 <section id="step1-sectors" class="section-card">
                     <div class="step-header">
                         <h2 data-step="1">第一步：大模型宏观热点</h2>
-                        <div class="action-group" style="display:flex; gap:1rem; align-items:center;">
-                            <div class="input-group" style="display:flex; align-items:center; gap:0.5rem; border:1px solid var(--border-dim); padding:0.25rem 0.75rem; border-radius:8px; background:var(--bg-base);">
-                                <label for="capital" style="font-size:0.75rem; color:var(--text-secondary); font-weight:600;">资金(¥)</label>
-                                <input type="number" id="capital" value="10000" min="1000" step="100" style="width:80px; border:none; background:none; font-size:0.9rem; font-weight:bold; color:var(--cyan); outline:none;">
+                        <div class="action-group" >
+                            <div class="input-group" >
+                                <label for="capital" >资金(¥)</label>
+                                <input type="number" id="capital" value="10000" min="1000" step="100" >
                             </div>
                             <button id="startBtn" class="secondary-btn">重置进度</button>
                             <button id="btnFetchSectors" class="primary-btn">启动宏观分析</button>
@@ -74,38 +76,38 @@
                     </div>
 
                     <div id="aiReasoningArea" class="ai-reasoning hidden ds-markdown-content"
-                        style="padding: 1.5rem; background: rgba(0, 0, 0, 0.02); border-radius: 8px; border: 1px solid var(--border-dim);">
-                        <div id="aiReasoningText" style="font-size: 0.9rem; line-height: 1.6;"></div>
+                        >
+                        <div id="aiReasoningText" ></div>
                     </div>
 
                     <!-- Sector Watchlist Area (New Feature) -->
                     <div id="sectorWatchlistArea" class="sector-selection mt-4"
-                        style="background: #f0f9ff; padding: 1.5rem; border: 1px dashed var(--cyan); border-radius: 8px;">
+                        >
                         <h3
-                            style="font-family: var(--font-body); color: var(--cyan); margin-bottom: 1rem; font-size: 0.95rem; font-weight: 600;">
+                            >
                             我的关注板块
                         </h3>
                         <div id="watchedSectorsChips"
-                            style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 1rem;">
+                            >
                             <!-- Chips render here -->
                         </div>
-                        <div style="display: flex; gap: 0.5rem; align-items: stretch; margin-bottom: 1rem;">
+                        <div >
                             <input type="text" id="newWatchedSectorInput" placeholder="输入板块名称 (如: 低空经济)"
                                 class="cyan-input"
-                                style="flex: 1; padding: 0.5rem 1rem; background: var(--bg-surface); border: 1px solid var(--border-dim); color: var(--text-primary); border-radius: var(--radius-sm);">
+                                >
                             <button id="btnAddWatchedSector" class="secondary-btn outline"
-                                style="padding: 0 1.5rem;">添加板块</button>
+                                >添加板块</button>
                         </div>
-                        <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">💡 点击下方按钮可跳过 AI
+                        <p >💡 点击下方按钮可跳过 AI
                             宏观分析，直接锁定关注板块提取成分股并进入深筛。</p>
                         <button id="btnFetchWatchedStocks" class="primary-btn warning-bg">直接拉取关注板块成分股</button>
                     </div>
 
                     <div id="sectorSelectionArea" class="sector-selection hidden">
                         <h3
-                            style="font-family: var(--font-body); color: var(--cyan); margin-bottom: 0.5rem; font-size: 0.95rem; font-weight: 600;">
+                            >
                             请勾选目标板块 <span
-                                style="font-size:0.8rem; color:var(--text-secondary); font-weight: normal;">(提取时将自动包含您的所有自选板块)</span>
+                                >(提取时将自动包含您的所有自选板块)</span>
                         </h3>
                         <div id="sectorsCheckboxList" class="checkbox-group"><!-- Checkboxes here --></div>
                         <button id="btnFetchStocks" class="primary-btn mt-4 px-4">提取成分股</button>
@@ -121,10 +123,10 @@
                         </div>
                     </div>
                     <p class="progress-message mb-2"
-                        style="font-family: var(--font-body); font-size: 0.85rem; color: var(--text-secondary);">
+                        >
                         💡 已过虑：ST及退市股、科创板、创业板。主板标的池共计剩余
                         <span id="candidateCount" class="highlight-text text-cyan"
-                            style="font-size:1.1rem; font-weight:600;">0</span> 只股票储备。
+                            >0</span> 只股票储备。
                     </p>
                     <div class="table-container">
                         <table class="selectable-table">
@@ -172,18 +174,18 @@
                     </div>
                     <div id="watchlistContent" class="table-container mt-4">
                         <div class="watchlist-controls"
-                            style="display: flex; gap: 1rem; padding: 1.25rem 1.5rem; border-bottom: 1px solid var(--border-dim); align-items: center; background: var(--bg-card);">
+                            >
                             <input type="text" id="manualStockCodeInput" placeholder="输入股票代码 (如 600519)..."
-                                style="width: 200px; padding: 0.65rem 1rem; border-radius: 8px; border: 1px solid var(--border-dim); background: var(--bg-surface); font-size: 0.9rem; outline: none; transition: border-color 0.2s, box-shadow 0.2s;">
+                                >
                             <button id="btnManualAddStock" class="primary-btn"
-                                style="padding: 0.65rem 1.5rem; border-radius: 8px; font-weight: 600; box-shadow: var(--shadow-sm);">+
+                                >+
                                 添加自选</button>
                             <button id="btnRefreshPrices" class="secondary-btn"
-                                style="padding: 0.65rem 1.25rem; border-radius: 8px; font-weight: 500; margin-left: auto;">
+                                >
                                 ↻ 刷新行情</button>
                         </div>
                         <p id="emptyWatchlistMsg" class="text-sm p-4 hidden"
-                            style="color:var(--text-muted); text-align:center; font-family: var(--font-body);">
+                            >
                             暂无关注的股票，请前往选股分析添加或上方手动输入。</p>
                         <table class="selectable-table" id="watchlistTable">
                             <thead>
@@ -218,7 +220,7 @@
                     <span class="score-total">/100</span>
                 </div>
             </header>
-            <div class="table-container" style="padding: 0 0.75rem;">
+            <div class="table-container" >
                 <table class="audit-table">
                     <thead>
                         <tr>
@@ -240,14 +242,14 @@
 
                 <!-- Action Buttons Footer -->
                 <div class="card-action-bar"
-                    style="margin-top: 1.5rem; display: flex; gap: 1rem; align-items: center; justify-content: space-between;">
+                    >
                     <button class="secondary-btn btn-toggle-watchlist" data-code="" data-name="" data-sectors="">+
                         添加自选</button>
-                    <button class="primary-btn btn-ds-analyze" data-code="" style="flex:1;">AI 深度诊断</button>
+                    <button class="primary-btn btn-ds-analyze" data-code="" >AI 深度诊断</button>
                 </div>
                 <!-- DeepSeek Analysis Result Container -->
                 <div class="ds-result-container hidden"
-                    style="margin-top: 1rem; padding: 1.5rem; background: var(--bg-surface); border-radius: var(--radius-sm); border: 1px solid var(--border-dim);">
+                    >
                     <div class="ds-markdown-content text-left"></div>
                 </div>
             </footer>

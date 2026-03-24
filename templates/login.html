@@ -4,116 +4,54 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>登录 - 量化审计系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { primary: "#0066CC", secondary: "#0099AA", base: "#EFF6FF", card: "#FFFFFF" }
+                }
+            }
+        }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --primary: #0071e3;
-            --bg: #f5f5f7;
-            --text: #1d1d1f;
-            --error: #d93025;
-        }
-        body {
-            font-family: 'Inter', -apple-system, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
-            margin: 0;
-        }
-        .login-card {
-            background: #fff;
-            padding: 2.5rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
-            width: 100%;
-            max-width: 400px;
-        }
-        .logo {
-            text-align: center;
-            margin-bottom: 2rem;
-            font-size: 1.5rem;
-            font-weight: 700;
-        }
-        .logo span { color: var(--primary); }
-        .form-group { margin-bottom: 1.5rem; }
-        label { display: block; margin-bottom: 0.5rem; font-size: 0.875rem; font-weight: 500; }
-        input {
-            width: 100%;
-            padding: 0.75rem;
-            border: 1px solid #d2d2d7;
-            border-radius: 8px;
-            box-sizing: border-box;
-            font-size: 1rem;
-            transition: border-color 0.2s;
-        }
-        input:focus {
-            outline: none;
-            border-color: var(--primary);
-            box-shadow: 0 0 0 4px rgba(0,113,227,0.1);
-        }
-        button {
-            width: 100%;
-            padding: 0.75rem;
-            background: var(--primary);
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            font-size: 1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        button:hover { background: #0062c3; }
-        .flash-messages {
-            margin-bottom: 1.5rem;
-            list-style: none;
-            padding: 0;
-        }
-        .flash-messages li {
-            background: #fdeded;
-            color: var(--error);
-            padding: 0.75rem;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            text-align: center;
-        }
-        .footer-note {
-            text-align: center;
-            margin-top: 1.5rem;
-            font-size: 0.75rem;
-            color: #86868b;
-        }
-    </style>
 </head>
-<body>
-    <div class="login-card">
-        <div class="logo">量化审计<span>PRO</span></div>
+<body class="bg-gray-50 text-gray-900 flex items-center justify-center min-h-screen font-['Inter'] m-0">
+    <div class="bg-white p-10 rounded-xl shadow-sm border border-gray-100 w-full max-w-md">
+        <div class="text-center mb-8 text-2xl font-bold text-gray-800">
+            量化审计<span class="text-primary ml-1">PRO</span>
+        </div>
         
         {% with messages = get_flashed_messages() %}
           {% if messages %}
-            <ul class="flash-messages">
+            <ul class="mb-6 space-y-2">
               {% for message in messages %}
-                <li>{{ message }}</li>
+                <li class="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm text-center font-medium">{{ message }}</li>
               {% endfor %}
             </ul>
           {% endif %}
         {% endwith %}
 
-        <form method="POST">
-            <div class="form-group">
-                <label for="username">用户名</label>
-                <input type="text" id="username" name="username" required autofocus>
+        <form method="POST" class="space-y-6">
+            <div>
+                <label for="username" class="block mb-2 text-sm font-medium text-gray-700">用户名</label>
+                <input type="text" id="username" name="username" required autofocus 
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow text-gray-900">
             </div>
-            <div class="form-group">
-                <label for="password">密码</label>
-                <input type="password" id="password" name="password" required>
+            <div>
+                <label for="password" class="block mb-2 text-sm font-medium text-gray-700">密码</label>
+                <input type="password" id="password" name="password" required 
+                    class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-shadow text-gray-900">
             </div>
-            <button type="submit">登录</button>
+            <button type="submit" 
+                class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-base font-semibold transition-colors shadow-sm">
+                登录
+            </button>
         </form>
 
-        <div class="footer-note">由管理员开通账号，请联系技术支持。</div>
+        <div class="text-center mt-8 text-xs text-gray-500">
+            由管理员开通账号，请联系技术支持。
+        </div>
     </div>
 </body>
 </html>

@@ -4,166 +4,93 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>个人设置 - 量化审计系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: { primary: "#0066CC", secondary: "#0099AA", base: "#EFF6FF", card: "#FFFFFF" }
+                }
+            }
+        }
+    </script>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
-    <style>
-        :root {
-            --primary: #0071e3;
-            --bg: #f5f5f7;
-            --text: #1d1d1f;
-            --border: #d2d2d7;
-            --success: #34c759;
-        }
-        body {
-            font-family: 'Inter', -apple-system, sans-serif;
-            background-color: var(--bg);
-            color: var(--text);
-            margin: 0;
-            padding: 2rem;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: #fff;
-            padding: 2rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
-        }
-        header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 2rem;
-        }
-        h1 { margin: 0; font-size: 1.5rem; }
-        .back-link { color: var(--primary); text-decoration: none; font-size: 0.875rem; }
-        
-        .section {
-            margin-bottom: 2.5rem;
-            padding-bottom: 2rem;
-            border-bottom: 1px solid var(--border);
-        }
-        .section:last-child { border-bottom: none; }
-        .section h2 { margin-top: 0; font-size: 1.125rem; margin-bottom: 0.5rem; color: #1d1d1f; }
-        .section p { font-size: 0.875rem; color: #86868b; margin-bottom: 1.5rem; }
-        
-        .form-group { margin-bottom: 1.25rem; }
-        label { display: block; margin-bottom: 0.4rem; font-size: 0.875rem; font-weight: 500; }
-        input {
-            width: 100%;
-            padding: 0.75rem;
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            box-sizing: border-box;
-            font-size: 1rem;
-        }
-        input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px rgba(0,113,227,0.1); }
-        
-        .btn {
-            padding: 0.75rem 1.5rem;
-            border-radius: 8px;
-            font-size: 0.875rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s;
-            border: none;
-        }
-        .btn-primary { background: var(--primary); color: #fff; }
-        .btn-primary:hover { background: #0062c3; }
-        .btn-outline { background: #fff; border: 1px solid var(--border); color: var(--text); }
-        .btn-outline:hover { background: #f5f5f7; }
-
-        .key-status {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-            font-size: 0.75rem;
-            margin-top: 0.5rem;
-        }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; }
-        .status-on { background: var(--success); }
-        .status-off { background: #86868b; }
-        
-        .flash-messages {
-            margin-bottom: 1.5rem;
-            list-style: none;
-            padding: 0;
-        }
-        .flash-messages li {
-            padding: 1rem;
-            border-radius: 8px;
-            margin-bottom: 0.5rem;
-            font-size: 0.875rem;
-        }
-        .flash-success { background: #e6f4ea; color: #1e8e3e; }
-        .flash-error { background: #fdeded; color: #d93025; }
-    </style>
 </head>
-<body>
-    <div class="container">
-        <header>
-            <h1>个人设置</h1>
-            <a href="{{ url_for('index') }}" class="back-link">返回工作台</a>
+<body class="bg-gray-50 text-gray-900 font-['Inter'] m-0 p-8">
+    <div class="max-w-3xl mx-auto bg-white p-8 rounded-xl shadow-sm border border-gray-100">
+        <header class="flex justify-between items-center mb-8 pb-4 border-b border-gray-100">
+            <h1 class="text-2xl font-bold text-gray-800 m-0">个人设置</h1>
+            <a href="{{ url_for('index') }}" class="text-blue-600 hover:text-blue-800 text-sm font-medium transition-colors">返回工作台</a>
         </header>
 
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
-            <ul class="flash-messages">
+            <ul class="mb-8 space-y-3">
               {% for category, message in messages %}
-                <li class="flash-{{ 'success' if category == 'success' else 'error' }}">{{ message }}</li>
+                <li class="px-4 py-3 rounded-lg text-sm font-medium {{ 'bg-green-50 text-green-700 border border-green-200' if category == 'success' else 'bg-red-50 text-red-700 border border-red-200' }}">
+                    {{ message }}
+                </li>
               {% endfor %}
             </ul>
           {% endif %}
         {% endwith %}
 
-        <div class="section">
-            <h2>模型连接 API Key</h2>
-            <p>保存后，系统在进行宏观分析和个股诊断时将自动加载您的 Key，无需每次手动输入。Key 将加密存储在服务器中。</p>
+        <div class="mb-10 pb-8 border-b border-gray-100">
+            <h2 class="text-lg font-semibold text-gray-900 mb-2">模型连接 API Key</h2>
+            <p class="text-sm text-gray-500 mb-6">保存后，系统在进行宏观分析和个股诊断时将自动加载您的 Key，无需每次手动输入。Key 将加密存储在服务器中。</p>
             
-            <form action="{{ url_for('update_keys') }}" method="POST">
-                <div class="form-group">
-                    <label for="ds_key">DeepSeek API Key</label>
-                    <input type="password" id="ds_key" name="ds_key" placeholder="{{ '已配置 (输入以覆盖)' if has_ds_key else 'sk-...' }}">
-                    <div class="key-status">
-                        <span class="status-dot {{ 'status-on' if has_ds_key else 'status-off' }}"></span>
-                        <span>{{ '已配置' if has_ds_key else '未配置' }}</span>
+            <form action="{{ url_for('update_keys') }}" method="POST" class="space-y-5">
+                <div>
+                    <label for="ds_key" class="block mb-2 text-sm font-medium text-gray-700">DeepSeek API Key</label>
+                    <input type="password" id="ds_key" name="ds_key" placeholder="{{ '已配置 (输入以覆盖)' if has_ds_key else 'sk-...' }}" 
+                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                    <div class="flex items-center gap-2 mt-2 text-xs">
+                        <span class="w-2 h-2 rounded-full {{ 'bg-green-500' if has_ds_key else 'bg-gray-400' }}"></span>
+                        <span class="{{ 'text-green-700 font-medium' if has_ds_key else 'text-gray-500' }}">{{ '已配置' if has_ds_key else '未配置' }}</span>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label for="gemini_key">Gemini API Key (备选)</label>
-                    <input type="password" id="gemini_key" name="gemini_key" placeholder="{{ '已配置 (输入以覆盖)' if has_gemini_key else '输入密钥...' }}">
-                    <div class="key-status">
-                        <span class="status-dot {{ 'status-on' if has_gemini_key else 'status-off' }}"></span>
-                        <span>{{ '已配置' if has_gemini_key else '未配置' }}</span>
+                <div>
+                    <label for="gemini_key" class="block mb-2 text-sm font-medium text-gray-700">Gemini API Key (备选)</label>
+                    <input type="password" id="gemini_key" name="gemini_key" placeholder="{{ '已配置 (输入以覆盖)' if has_gemini_key else '输入密钥...' }}" 
+                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                    <div class="flex items-center gap-2 mt-2 text-xs">
+                        <span class="w-2 h-2 rounded-full {{ 'bg-green-500' if has_gemini_key else 'bg-gray-400' }}"></span>
+                        <span class="{{ 'text-green-700 font-medium' if has_gemini_key else 'text-gray-500' }}">{{ '已配置' if has_gemini_key else '未配置' }}</span>
                     </div>
                 </div>
-                <button type="submit" class="btn btn-primary">保存 Key 设置</button>
+                <button type="submit" class="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium transition-colors shadow-sm">保存 Key 设置</button>
             </form>
         </div>
 
-        <div class="section">
-            <h2>账户安全</h2>
-            <p>建议定期修改您的登录密码以确保数据安全。</p>
+        <div>
+            <h2 class="text-lg font-semibold text-gray-900 mb-2">账户安全</h2>
+            <p class="text-sm text-gray-500 mb-6">建议定期修改您的登录密码以确保数据安全。</p>
             
-            <form action="{{ url_for('update_password') }}" method="POST">
-                <div class="form-group">
-                    <label for="current_password">当前密码</label>
-                    <input type="password" id="current_password" name="current_password" required>
+            <form action="{{ url_for('update_password') }}" method="POST" class="space-y-5">
+                <div>
+                    <label for="current_password" class="block mb-2 text-sm font-medium text-gray-700">当前密码</label>
+                    <input type="password" id="current_password" name="current_password" required 
+                        class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
                 </div>
-                <div class="form-group">
-                    <label for="new_password">新密码</label>
-                    <input type="password" id="new_password" name="new_password" required>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                    <div>
+                        <label for="new_password" class="block mb-2 text-sm font-medium text-gray-700">新密码</label>
+                        <input type="password" id="new_password" name="new_password" required 
+                            class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                    </div>
+                    <div>
+                        <label for="confirm_password" class="block mb-2 text-sm font-medium text-gray-700">确认新密码</label>
+                        <input type="password" id="confirm_password" name="confirm_password" required 
+                            class="w-full px-4 py-2.5 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent text-sm">
+                    </div>
                 </div>
-                <div class="form-group">
-                    <label for="confirm_password">确认新密码</label>
-                    <input type="password" id="confirm_password" name="confirm_password" required>
-                </div>
-                <button type="submit" class="btn btn-outline">更新密码</button>
+                <button type="submit" class="px-6 py-2.5 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-lg text-sm font-medium transition-colors">更新密码</button>
             </form>
         </div>
 
         {% if current_user.must_change_password %}
-        <div style="background: #fff8e1; border: 1px solid #ffca28; padding: 1rem; border-radius: 8px; margin-top: 1rem; font-size: 0.875rem;">
-            ⚠️ <strong>提示：</strong> 您正在使用初始密码或系统重置的密码，请立即修改密码以解除限制。
+        <div class="mt-8 bg-yellow-50 border border-yellow-200 text-yellow-800 px-4 py-3 rounded-lg text-sm">
+            ⚠️ <strong class="font-semibold">提示：</strong> 您正在使用初始密码或系统重置的密码，请立即修改密码以解除限制。
         </div>
         {% endif %}
     </div>
