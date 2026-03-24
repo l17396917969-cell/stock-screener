@@ -1,263 +1,338 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>A股智能量化审计系统 Pro</title>
+    <title>量化审计 PRO</title>
     <script src="https://cdn.tailwindcss.com"></script>
-<script>tailwind.config = { theme: { extend: { colors: { primary: "#0066CC", secondary: "#0099AA", base: "#EFF6FF", card: "#FFFFFF" } } } }</script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='index.css') }}?v=2.0">
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
-        rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#0f172a", /* slate-900 */
+                        secondary: "#334155", /* slate-700 */
+                        accent: "#2563eb", /* blue-600 */
+                        surface: "#f8fafc", /* slate-50 */
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'ui-sans-serif', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Custom scrollbar and minor overrides that Tailwind CDN misses */
+        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; color: #1e293b; }
+        .log-terminal::-webkit-scrollbar { width: 6px; }
+        .log-terminal::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        .ds-markdown-content p { margin-bottom: 0.75rem; }
+        .ds-markdown-content h3 { font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; color: #0f172a; }
+        .ds-markdown-content ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+        /* Smooth transitions */
+        .fade-enter { opacity: 0; transform: translateY(10px); }
+        .fade-enter-active { opacity: 1; transform: translateY(0); transition: opacity 300ms, transform 300ms; }
+    </style>
 </head>
+<body class="min-h-screen flex flex-col">
 
-<body>
-    <div class="app-container">
-        <!-- Header -->
-        <header class="app-header">
-            <div class="logo">
-                <span class="logo-icon">▲</span>
-                <h1>量化审计 <span>PRO</span></h1>
-            </div>
-            
-            <div class="header-status">
-                <div id="keyStatusChips" class="status-chips" >
-                    <!-- Chips rendered by JS -->
-                </div>
-            </div>
-
-            <div class="user-menu" >
-                <div class="user-info" >
-                    <div >
-                        {{ current_user.username[0].upper() }}
+    <!-- Top Navigation Bar (SaaS Style) -->
+    <nav class="bg-white border-b border-gray-200 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <!-- Logo & Nav Links -->
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 flex items-center gap-2">
+                        <div class="w-8 h-8 bg-blue-600 text-white rounded flex items-center justify-center font-bold text-lg">▲</div>
+                        <span class="font-bold text-xl tracking-tight text-gray-900">量化审计 <span class="text-blue-600">PRO</span></span>
                     </div>
-                    <span class="username" >{{ current_user.username }}</span>
-                    {% if current_user.is_admin %}
-                        <span class="admin-badge" >ADMIN</span>
-                    {% endif %}
+                    <div class="hidden sm:ml-8 sm:flex sm:space-x-4">
+                        <button id="navScreener" class="border-blue-500 text-gray-900 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors">
+                            量化选股
+                        </button>
+                        <button id="navWatchlist" class="border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors">
+                            我的自选
+                        </button>
+                    </div>
                 </div>
-                <div class="dropdown-menu" >
-                    <a href="{{ url_for('settings') }}" >个人设置</a>
-                    {% if current_user.is_admin %}
-                        <a href="{{ url_for('admin_users') }}" >用户管理</a>
-                    {% endif %}
-                    <hr >
-                    <form action="{{ url_for('auth.logout') }}" method="POST" >
-                        <button type="submit" >退出登录</button>
-                    </form>
-                </div>
-            </div>
-        </header>
 
-        <!-- Top Navigation Bar -->
-        <nav class="app-nav">
-            <button id="navScreener" class="nav-btn active">量化选股</button>
-            <button id="navWatchlist" class="nav-btn">我的自选</button>
-        </nav>
-
-        <!-- Main Content -->
-        <main class="app-main">
-            <!-- PAGE 1: Screener Wizard -->
-            <div id="pageScreener" class="page-container active">
-                <!-- STEP 1: AI Sector Analysis -->
-                <section id="step1-sectors" class="section-card">
-                    <div class="step-header">
-                        <h2 data-step="1">第一步：大模型宏观热点</h2>
-                        <div class="action-group" >
-                            <div class="input-group" >
-                                <label for="capital" >资金(¥)</label>
-                                <input type="number" id="capital" value="10000" min="1000" step="100" >
+                <!-- Status & User Profile -->
+                <div class="flex items-center gap-6">
+                    <div id="keyStatusChips" class="flex gap-2 text-xs">
+                        <!-- Rendered by JS -->
+                    </div>
+                    
+                    <div class="relative group">
+                        <button class="flex items-center gap-2 focus:outline-none">
+                            <div class="w-8 h-8 rounded-full bg-slate-800 text-white flex items-center justify-center text-sm font-semibold shadow-sm">
+                                {{ current_user.username[0].upper() }}
                             </div>
-                            <button id="startBtn" class="secondary-btn">重置进度</button>
-                            <button id="btnFetchSectors" class="primary-btn">启动宏观分析</button>
+                            <span class="text-sm font-medium text-gray-700 hidden md:block">{{ current_user.username }}</span>
+                            {% if current_user.is_admin %}
+                                <span class="px-2 py-0.5 text-xs font-medium bg-amber-100 text-amber-800 rounded-md hidden md:block">ADMIN</span>
+                            {% endif %}
+                            <svg class="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </button>
+                        <!-- Dropdown -->
+                        <div class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 border border-gray-100 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50">
+                            <a href="{{ url_for('settings') }}" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">个人设置</a>
+                            {% if current_user.is_admin %}
+                                <a href="{{ url_for('admin_users') }}" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">用户管理</a>
+                            {% endif %}
+                            <div class="border-t border-gray-100 my-1"></div>
+                            <form action="{{ url_for('auth.logout') }}" method="POST">
+                                <button type="submit" class="block w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 font-medium">退出登录</button>
+                            </form>
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+    </nav>
 
-                    <div id="aiReasoningArea" class="ai-reasoning hidden ds-markdown-content"
-                        >
-                        <div id="aiReasoningText" ></div>
+    <!-- Main Content Area -->
+    <main class="flex-grow max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        <!-- ========================================== -->
+        <!-- PAGE 1: 量化选股 (Screener Wizard)         -->
+        <!-- ========================================== -->
+        <div id="pageScreener" class="space-y-6 block">
+            
+            <!-- STEP 1: AI Sector Analysis -->
+            <section id="step1-sectors" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="px-6 py-5 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div class="flex items-center gap-3">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 font-bold text-xs">1</span>
+                        <h2 class="text-lg font-bold text-gray-900">大模型宏观热点定调</h2>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <div class="flex items-center border border-gray-300 rounded-lg bg-gray-50 px-3 py-1.5">
+                            <span class="text-gray-500 text-sm mr-2">模拟资金 ¥</span>
+                            <input type="number" id="capital" value="100000" min="10000" step="10000" class="bg-transparent border-none text-sm font-semibold w-24 focus:ring-0 p-0 text-right">
+                        </div>
+                        <button id="startBtn" class="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors shadow-sm">
+                            重置进度
+                        </button>
+                        <button id="btnFetchSectors" class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                            启动 AI 宏观分析
+                        </button>
+                    </div>
+                </div>
+
+                <div class="p-6 space-y-6">
+                    <!-- AI Reasoning Area -->
+                    <div id="aiReasoningArea" class="hidden bg-blue-50 border border-blue-100 rounded-lg p-5">
+                        <h3 class="text-sm font-bold text-blue-800 mb-3 flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zM10 18a3 3 0 01-3-3h6a3 3 0 01-3 3z"></path></svg>
+                            AI 总监宏观复盘逻辑
+                        </h3>
+                        <div id="aiReasoningText" class="ds-markdown-content text-sm text-gray-700 leading-relaxed"></div>
                     </div>
 
-                    <!-- Sector Watchlist Area (New Feature) -->
-                    <div id="sectorWatchlistArea" class="sector-selection mt-4"
-                        >
-                        <h3
-                            >
-                            我的关注板块
-                        </h3>
-                        <div id="watchedSectorsChips"
-                            >
+                    <!-- Manual Sector Watchlist -->
+                    <div id="sectorWatchlistArea" class="bg-gray-50 rounded-lg p-5 border border-gray-200">
+                        <h3 class="text-sm font-bold text-gray-800 mb-3">我关注的热门题材</h3>
+                        <div id="watchedSectorsChips" class="flex flex-wrap gap-2 mb-4">
                             <!-- Chips render here -->
                         </div>
-                        <div >
-                            <input type="text" id="newWatchedSectorInput" placeholder="输入板块名称 (如: 低空经济)"
-                                class="cyan-input"
-                                >
-                            <button id="btnAddWatchedSector" class="secondary-btn outline"
-                                >添加板块</button>
-                        </div>
-                        <p >💡 点击下方按钮可跳过 AI
-                            宏观分析，直接锁定关注板块提取成分股并进入深筛。</p>
-                        <button id="btnFetchWatchedStocks" class="primary-btn warning-bg">直接拉取关注板块成分股</button>
-                    </div>
-
-                    <div id="sectorSelectionArea" class="sector-selection hidden">
-                        <h3
-                            >
-                            请勾选目标板块 <span
-                                >(提取时将自动包含您的所有自选板块)</span>
-                        </h3>
-                        <div id="sectorsCheckboxList" class="checkbox-group"><!-- Checkboxes here --></div>
-                        <button id="btnFetchStocks" class="primary-btn mt-4 px-4">提取成分股</button>
-                    </div>
-                </section>
-
-                <!-- STEP 2: Candidate Stock Table -->
-                <section id="step2-stocks" class="section-card hidden">
-                    <div class="step-header">
-                        <h2 data-step="2">第二步：核心标的池</h2>
-                        <div class="action-group">
-                            <button id="btnAnalyzeBatch" class="primary-btn warning-bg">批量深度审计</button>
+                        <div class="flex gap-2">
+                            <input type="text" id="newWatchedSectorInput" placeholder="输入题材名称 (如: 低空经济, 固态电池)" class="flex-grow px-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                            <button id="btnAddWatchedSector" class="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 shadow-sm transition-colors">
+                                添加监控
+                            </button>
+                            <button id="btnFetchWatchedStocks" class="px-4 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 shadow-sm transition-colors whitespace-nowrap">
+                                仅审计以上题材
+                            </button>
                         </div>
                     </div>
-                    <p class="progress-message mb-2"
-                        >
-                        💡 已过虑：ST及退市股、科创板、创业板。主板标的池共计剩余
-                        <span id="candidateCount" class="highlight-text text-cyan"
-                            >0</span> 只股票储备。
-                    </p>
-                    <div class="table-container">
-                        <table class="selectable-table">
-                            <thead>
-                                <tr>
-                                    <th>股票代码</th>
-                                    <th>股票名称</th>
-                                    <th>所属板块</th>
-                                    <th>状态分析</th>
-                                    <th class="text-right">操作</th>
-                                </tr>
-                            </thead>
-                            <tbody id="candidatesTbody"></tbody>
-                        </table>
-                    </div>
-                </section>
 
-                <!-- STEP 3: Live Logs + Report Cards -->
-                <section id="step3-analysis" class="results-container hidden">
-                    <!-- Live Log Terminal -->
-                    <div class="log-terminal" id="logTerminal">
-                        <div class="log-header">
-                            <span class="log-dot red"></span>
-                            <span class="log-dot yellow"></span>
-                            <span class="log-dot green"></span>
-                            <span class="log-title">实时量化审计日志</span>
+                    <!-- AI Suggested Sectors -->
+                    <div id="sectorSelectionArea" class="hidden border-t border-gray-200 pt-6">
+                        <h3 class="text-sm font-bold text-gray-800 mb-4">AI 推荐共振板块 <span class="text-gray-500 font-normal text-xs">(提取时将自动包含您的所有自选题材)</span></h3>
+                        <div id="sectorsCheckboxList" class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                            <!-- Checkboxes here -->
                         </div>
-                        <div id="logBody" class="log-body"></div>
+                        <div class="mt-5 flex justify-end">
+                            <button id="btnFetchStocks" class="px-5 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors shadow-sm">
+                                提取板块成分股 →
+                            </button>
+                        </div>
                     </div>
+                </div>
+            </section>
 
-                    <!-- Report Card Header -->
-                    <div class="step-header mb-4 mt-4">
-                        <h2 data-step="3">第三步：终极量化审计结果</h2>
+            <!-- STEP 2: Candidate Stock Table -->
+            <section id="step2-stocks" class="hidden bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mt-6">
+                <div class="px-6 py-5 border-b border-gray-200 flex items-center justify-between">
+                    <div class="flex items-center gap-3">
+                        <span class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 font-bold text-xs">2</span>
+                        <h2 class="text-lg font-bold text-gray-900">核心标的池清洗</h2>
                     </div>
+                    <button id="btnAnalyzeBatch" class="px-4 py-2 bg-amber-500 text-white text-sm font-medium rounded-lg hover:bg-amber-600 transition-colors shadow-sm flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 002-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"></path></svg>
+                        启动批量深度审计
+                    </button>
+                </div>
+                
+                <div class="bg-amber-50 px-6 py-3 border-b border-amber-100 text-amber-800 text-sm font-medium flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path></svg>
+                    已通过系统级风控过滤（剔除 ST、退市风险、科创创业板）。主板标的池剩余 <span id="candidateCount" class="font-bold text-blue-600 text-base mx-1">0</span> 只储备。
+                </div>
 
-                    <div id="stockCardsArea" class="stock-cards-grid"></div>
-                </section>
+                <div class="overflow-x-auto max-h-[500px]">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50 sticky top-0 z-10">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">代码</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">名称</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">所属概念</th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">审计状态</th>
+                                <th scope="col" class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="candidatesTbody" class="bg-white divide-y divide-gray-200 text-sm">
+                            <!-- Rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- STEP 3: Live Logs + Report Cards -->
+            <section id="step3-analysis" class="hidden mt-8 space-y-6">
+                <!-- Log Terminal -->
+                <div class="bg-[#0f172a] rounded-xl shadow-lg overflow-hidden border border-slate-700">
+                    <div class="bg-[#1e293b] px-4 py-2 border-b border-slate-700 flex items-center gap-2">
+                        <div class="flex gap-1.5">
+                            <div class="w-3 h-3 rounded-full bg-red-500"></div>
+                            <div class="w-3 h-3 rounded-full bg-yellow-500"></div>
+                            <div class="w-3 h-3 rounded-full bg-green-500"></div>
+                        </div>
+                        <span class="text-slate-400 text-xs font-mono ml-2 tracking-wider">SYSTEM_AUDIT_LOG_TERMINAL</span>
+                    </div>
+                    <div id="logBody" class="p-4 h-48 overflow-y-auto font-mono text-sm text-slate-300 space-y-1.5 log-terminal">
+                        <!-- Logs injected by JS -->
+                    </div>
+                </div>
+
+                <!-- Final Cards Header -->
+                <div class="flex items-center gap-3 pt-6 pb-2">
+                    <span class="flex items-center justify-center w-6 h-6 rounded-full bg-blue-100 text-blue-700 font-bold text-xs">3</span>
+                    <h2 class="text-xl font-bold text-gray-900">大模型量化审评通过名单 (The Alpha List)</h2>
+                </div>
+
+                <div id="stockCardsArea" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+                    <!-- Cards injected by JS -->
+                </div>
+            </section>
+        </div>
+
+        <!-- ========================================== -->
+        <!-- PAGE 2: 我的自选 (Watchlist)               -->
+        <!-- ========================================== -->
+        <div id="pageWatchlist" class="hidden space-y-6">
+            <section class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                <div class="px-6 py-5 border-b border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <h2 class="text-lg font-bold text-gray-900 flex items-center gap-2">
+                        <svg class="w-5 h-5 text-amber-500" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"></path></svg>
+                        核心实盘自选库
+                    </h2>
+                    <div class="flex gap-2">
+                        <button id="btnRefreshPrices" class="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-50 transition-colors shadow-sm flex items-center gap-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                            刷新实时盘口
+                        </button>
+                    </div>
+                </div>
+
+                <div class="p-6 border-b border-gray-100 bg-gray-50/50">
+                    <div class="flex gap-3 max-w-md">
+                        <input type="text" id="manualStockCodeInput" placeholder="输入 A股/美股 代码直接添加..." class="flex-grow px-4 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none">
+                        <button id="btnManualAddStock" class="px-4 py-2 bg-slate-800 text-white text-sm font-medium rounded-lg hover:bg-slate-900 transition-colors shadow-sm whitespace-nowrap">
+                            加入股票池
+                        </button>
+                    </div>
+                </div>
+
+                <div id="emptyWatchlistMsg" class="hidden py-12 text-center text-gray-500 text-sm">
+                    自选库空空如也，请在“量化选股”中淘金，或上方手动添加。
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table id="watchlistTable" class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">标的</th>
+                                <th class="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">概念属性</th>
+                                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">当前现价</th>
+                                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">今日涨跌</th>
+                                <th class="px-6 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider">AI 持仓诊断</th>
+                                <th class="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">操作</th>
+                            </tr>
+                        </thead>
+                        <tbody id="watchlistTbody" class="bg-white divide-y divide-gray-200 text-sm">
+                            <!-- Rows injected by JS -->
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        </div>
+
+    </main>
+
+    <!-- Modal Overlay -->
+    <div id="commonModal" class="fixed inset-0 z-[100] hidden">
+        <div class="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" id="modalBackdrop"></div>
+        <div class="flex items-center justify-center min-h-screen px-4 pt-4 pb-20 text-center sm:p-0">
+            <div class="relative bg-white rounded-xl shadow-2xl text-left overflow-hidden transform transition-all sm:my-8 sm:max-w-2xl sm:w-full border border-gray-100 flex flex-col max-h-[85vh]">
+                <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+                    <h3 id="modalTitle" class="text-lg font-bold text-gray-900">标题</h3>
+                    <button id="modalClose" class="text-gray-400 hover:text-gray-600 focus:outline-none bg-white rounded-full p-1 border border-transparent hover:border-gray-200 transition-all">
+                        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
+                    </button>
+                </div>
+                <div id="modalBody" class="px-6 py-5 overflow-y-auto ds-markdown-content text-sm text-gray-700 leading-relaxed bg-white">
+                    <!-- Content -->
+                </div>
             </div>
-
-            <!-- PAGE 2: Watchlist -->
-            <div id="pageWatchlist" class="page-container hidden">
-                <section id="watchlist-section" class="section-card">
-                    <div class="step-header">
-                        <h2 data-step="★">我的核心自选及持仓</h2>
-                    </div>
-                    <div id="watchlistContent" class="table-container mt-4">
-                        <div class="watchlist-controls"
-                            >
-                            <input type="text" id="manualStockCodeInput" placeholder="输入股票代码 (如 600519)..."
-                                >
-                            <button id="btnManualAddStock" class="primary-btn"
-                                >+
-                                添加自选</button>
-                            <button id="btnRefreshPrices" class="secondary-btn"
-                                >
-                                ↻ 刷新行情</button>
-                        </div>
-                        <p id="emptyWatchlistMsg" class="text-sm p-4 hidden"
-                            >
-                            暂无关注的股票，请前往选股分析添加或上方手动输入。</p>
-                        <table class="selectable-table" id="watchlistTable">
-                            <thead>
-                                <tr>
-                                    <th>股票代码</th>
-                                    <th>股票简称</th>
-                                    <th>所属板块</th>
-                                    <th>加入时股价</th>
-                                    <th>当前股价</th>
-                                    <th>自选后走势</th>
-                                    <th class="text-right">操作</th>
-                                </tr>
-                            </thead>
-                            <tbody id="watchlistTbody"></tbody>
-                        </table>
-                    </div>
-                </section>
-            </div>
-        </main>
+        </div>
     </div>
 
-    <!-- Stock Card Template -->
-    <template id="stockCardTemplate">
-        <article class="stock-card">
-            <header class="card-header">
-                <div>
-                    <h3 class="stock-name">名称 (<span class="stock-code">000000</span>)</h3>
-                    <p class="info-text">板块：<span class="sectors-text"></span></p>
-                </div>
-                <div class="score-badge">
-                    <span class="score-value">—</span>
-                    <span class="score-total">/100</span>
-                </div>
-            </header>
-            <div class="table-container" >
-                <table class="audit-table">
-                    <thead>
-                        <tr>
-                            <th>维度</th>
-                            <th>指标名称</th>
-                            <th>审计结果</th>
-                            <th>依据/原始数据</th>
-                            <th class="text-right">评分</th>
-                        </tr>
-                    </thead>
-                    <tbody class="audit-body"></tbody>
-                </table>
-            </div>
-            <footer class="card-footer">
-                <div class="trade-plan-box">
-                    <h4>综合投资建议</h4>
-                    <p class="trade-plan-text"></p>
-                </div>
-
-                <!-- Action Buttons Footer -->
-                <div class="card-action-bar"
-                    >
-                    <button class="secondary-btn btn-toggle-watchlist" data-code="" data-name="" data-sectors="">+
-                        添加自选</button>
-                    <button class="primary-btn btn-ds-analyze" data-code="" >AI 深度诊断</button>
-                </div>
-                <!-- DeepSeek Analysis Result Container -->
-                <div class="ds-result-container hidden"
-                    >
-                    <div class="ds-markdown-content text-left"></div>
-                </div>
-            </footer>
-        </article>
-    </template>
-
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <script src="{{ url_for('static', filename='app.js') }}"></script>
-</body>
+    <script src="{{ url_for('static', filename='app.js') }}?v=2.0"></script>
 
+    <!-- UI Interaction Scripts for Dropdowns and Nav -->
+    <script>
+        // Simple client-side tab switching to mirror the logic in app.js
+        document.getElementById('navScreener').addEventListener('click', function() {
+            this.classList.add('border-blue-500', 'text-gray-900');
+            this.classList.remove('border-transparent', 'text-gray-500', 'hover:border-gray-300', 'hover:text-gray-700');
+            
+            const navWatch = document.getElementById('navWatchlist');
+            navWatch.classList.remove('border-blue-500', 'text-gray-900');
+            navWatch.classList.add('border-transparent', 'text-gray-500', 'hover:border-gray-300', 'hover:text-gray-700');
+            
+            document.getElementById('pageScreener').classList.remove('hidden');
+            document.getElementById('pageScreener').classList.add('block');
+            document.getElementById('pageWatchlist').classList.add('hidden');
+            document.getElementById('pageWatchlist').classList.remove('block');
+        });
+
+        document.getElementById('navWatchlist').addEventListener('click', function() {
+            this.classList.add('border-blue-500', 'text-gray-900');
+            this.classList.remove('border-transparent', 'text-gray-500', 'hover:border-gray-300', 'hover:text-gray-700');
+            
+            const navScreen = document.getElementById('navScreener');
+            navScreen.classList.remove('border-blue-500', 'text-gray-900');
+            navScreen.classList.add('border-transparent', 'text-gray-500', 'hover:border-gray-300', 'hover:text-gray-700');
+            
+            document.getElementById('pageWatchlist').classList.remove('hidden');
+            document.getElementById('pageWatchlist').classList.add('block');
+            document.getElementById('pageScreener').classList.add('hidden');
+            document.getElementById('pageScreener').classList.remove('block');
+        });
+    </script>
+</body>
 </html>
