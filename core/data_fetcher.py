@@ -170,21 +170,34 @@ def _fuzzy_match_sw_code(board_name):
 
 @retry_on_failure(retries=3)
 def get_board_stocks(board_name):
-    """获取指定板块的成分股 (申万行业)"""
     logger.info(f"Fetching stocks for board: {board_name}...")
     sw_code = _fuzzy_match_sw_code(board_name)
-    if not sw_code:
-        logger.warning(f"Skipping '{board_name}': no matching SW industry code found.")
-        return None
+    if sw_code:
+        with _akshare_semaphore:
+            _akshare_throttle()
+            df = ak.sw_index_third_cons(symbol=sw_code)
+        if df is not None and not df.empty:
+            df = df.rename(columns={"股票代码": "代码", "股票简称": "名称"})
+            logger.info(f"Board '{board_name}' ({sw_code}) → {len(df)} stocks")
+            return df
+    logger.warning(f"No SW match for '{board_name}', trying EastMoney concept board...")
+    return _get_concept_stocks_fallback(board_name)
 
-    with _akshare_semaphore:
-        _akshare_throttle()
-        df = ak.sw_index_third_cons(symbol=sw_code)
 
-    if df is not None and not df.empty:
-        df = df.rename(columns={"股票代码": "代码", "股票简称": "名称"})
-        logger.info(f"Board '{board_name}' ({sw_code}) → {len(df)} stocks")
-        return df
+def _get_concept_stocks_fallback(board_name):
+    try:
+        with _akshare_semaphore:
+            _akshare_throttle()
+            df = ak.stock_board_concept_cons_em(symbol=board_name)
+        if df is not None and not df.empty:
+            if "代码" in df.columns and "名称" in df.columns:
+                df = df.rename(columns={"代码": "代码", "名称": "名称"})
+            elif "股票代码" in df.columns and "股票简称" in df.columns:
+                df = df.rename(columns={"股票代码": "代码", "股票简称": "名称"})
+            logger.info(f"Concept board '{board_name}' → {len(df)} stocks")
+            return df
+    except Exception as e:
+        logger.warning(f"Concept board '{board_name}' also failed: {e}")
     return None
 
 
