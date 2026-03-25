@@ -584,12 +584,16 @@ def get_money_flow_data(code: str) -> dict:
 # ── yfinance 核心财务&技术数据 ────────────────────────────────
 
 
-@retry_on_failure(retries=2)
 def get_index_data(symbol="000001.SS"):
     """获取指数数据用于 RPS 计算"""
     _yf_rate_limit_wait()  # 添加限流等待
     t = yf.Ticker(symbol)
-    return t.history(period="1mo")
+    try:
+        return t.history(period="1mo")
+    except Exception as e:
+        if _check_yf_rate_limit(str(e)):
+            return None
+        raise
 
 
 def get_stock_data_yf(code: str, index_hist=None) -> dict | None:
