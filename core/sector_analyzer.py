@@ -234,7 +234,15 @@ def analyze_macro_sectors_with_ai() -> dict:
     sd = get_sector_snapshot()
     macro_news = get_latest_macro_news()
     sector_fund_flow = get_sector_fund_flow_top()
-    prompt = _build_prompt(md, sd, macro_news, sector_fund_flow)
+    macro_news_str = (
+        "\n".join(macro_news) if isinstance(macro_news, list) else str(macro_news)
+    )
+    sector_fund_flow_str = (
+        "\n".join(sector_fund_flow)
+        if isinstance(sector_fund_flow, list)
+        else str(sector_fund_flow)
+    )
+    prompt = _build_prompt(md, sd, macro_news_str, sector_fund_flow_str)
 
     ds_key = cfg.get("DS_API_KEY", "").strip()
     if ds_key:
