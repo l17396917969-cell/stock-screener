@@ -133,11 +133,10 @@ def execute_step1_macro(user_id, api_key=None, ds_key=None):
             },
         )
 
-        total_stocks = len(ai_analysis.get("stock_infos", {}))
         _emit_log(
             user_id,
             f"[PASS] AI宏观定调完毕，推荐板块: {', '.join(hot_sectors)}"
-            f"，共覆盖 {total_stocks} 只候选股股票。",
+            f"（成分股将在Step2实时拉取）",
             "pass",
         )
 

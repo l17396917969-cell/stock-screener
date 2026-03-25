@@ -279,6 +279,84 @@ def get_sector_snapshot():
         return None
 
 
+@retry_on_failure(retries=3)
+def get_latest_macro_news() -> list[str]:
+    """获取最新宏观/市场新闻 (财新或CCTV)"""
+    logger.info("Fetching latest macro news...")
+    news_list = []
+    try:
+        # 优先尝试财新市场动态新闻 (速度快，宏观性强)
+        df = ak.stock_news_main_cx()
+        if df is not None and not df.empty:
+            for _, row in df.head(15).iterrows():
+                tag = row.get("tag", "新闻")
+                summary = row.get("summary", "")
+                if summary:
+                    news_list.append(f"[{tag}] {summary}")
+            if news_list:
+                return news_list
+    except Exception as e:
+        logger.debug(f"Failed to fetch CX news: {e}")
+
+    try:
+        # 备选：尝试获取今天或昨天的新闻联播
+        for days_back in range(3):
+            target_date = (datetime.now() - timedelta(days=days_back)).strftime(
+                "%Y%m%d"
+            )
+            try:
+                df = ak.news_cctv(date=target_date)
+                if df is not None and not df.empty:
+                    for _, row in df.head(15).iterrows():
+                        title = row.get("title", "")
+                        content = row.get("content", "")
+                        if len(content) > 100:
+                            content = content[:100] + "..."
+                        if title:
+                            news_list.append(f"【{title}】{content}")
+                    if news_list:
+                        return news_list
+            except Exception as e:
+                logger.debug(f"Failed to fetch CCTV news for {target_date}: {e}")
+                continue
+    except Exception as e:
+        logger.error(f"Failed to fetch macro news: {e}")
+
+    return ["暂无最新宏观新闻"]
+
+
+@retry_on_failure(retries=3)
+def get_sector_fund_flow_top() -> list[str]:
+    """获取今日主力资金净流入前10的行业板块"""
+    logger.info("Fetching top sector fund flow...")
+    try:
+        # 使用 ak.stock_fund_flow_industry(symbol="即时")
+        df = ak.stock_fund_flow_industry(symbol="即时")
+        if df is not None and not df.empty:
+            # 确保有 '净额' 和 '行业' 列
+            if "净额" in df.columns and "行业" in df.columns:
+                # 净额通常是字符串或浮点数，确保转换为浮点数进行排序
+                df["净额"] = pd.to_numeric(df["净额"], errors="coerce").fillna(0)
+                # 按净额降序排列，取前10
+                df_sorted = df.sort_values(by="净额", ascending=False).head(10)
+
+                flow_list = []
+                for _, row in df_sorted.iterrows():
+                    sector = row["行业"]
+                    net_inflow = row["净额"]
+                    pct_change = row.get("行业-涨跌幅", 0)
+                    flow_list.append(
+                        f"{sector}: 净流入 {net_inflow} 亿元 (涨跌幅 {pct_change}%)"
+                    )
+
+                if flow_list:
+                    return flow_list
+    except Exception as e:
+        logger.error(f"Failed to fetch sector fund flow: {e}")
+
+    return ["暂无板块资金流向数据"]
+
+
 # ── 指标计算工具 (Technical Indicators) ────────────────────────
 
 
