@@ -187,13 +187,6 @@ def get_board_stocks(board_name):
         return df
     return None
 
-    df = ak.sw_index_third_cons(symbol=sw_code)
-    if df is not None and not df.empty:
-        df = df.rename(columns={"股票代码": "代码", "股票简称": "名称"})
-        logger.info(f"Board '{board_name}' ({sw_code}) → {len(df)} stocks")
-        return df
-    return None
-
 
 # ── 大盘与热门板块快照 (For AI Sector Analysis) ───────────────
 
@@ -223,9 +216,9 @@ def get_market_overview():
                     end_date=today_str,
                     frequency="d",
                 )
-                if rs.error_code == "0" and rs.re_data_range > 0:
+                if rs.error_code == "0" and rs.data and len(rs.data) > 0:
                     row = rs.data[0]
-                    close = float(row.open) if row.open else 0
+                    close = float(row.close) if row.close else 0
                     pct = float(row.pctChg) if row.pctChg else 0
                     indices[name] = f"{close:.2f} ({pct:+.2f}%)"
                 else:
@@ -234,9 +227,8 @@ def get_market_overview():
                 logger.warning(f"Failed to fetch {bs_code}: {e}")
                 indices[name] = "获取失败"
 
-        # 估算市场情绪（基于指数平均涨跌幅）
         pct_values = []
-        for name, val in indices.items():
+        for val in indices.values():
             import re
 
             m = re.search(r"\(([+-]?[\d.]+)%\)", val)
@@ -286,7 +278,7 @@ def get_sector_snapshot():
                     end_date=today_str,
                     frequency="d",
                 )
-                if rs.error_code == "0" and rs.data:
+                if rs.error_code == "0" and rs.data and len(rs.data) > 0:
                     row = rs.data[0]
                     pct = float(row.pctChg) if row.pctChg else 0
                     name = {
