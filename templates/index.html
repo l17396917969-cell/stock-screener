@@ -22,18 +22,756 @@
             }
         }
     </script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        /* Custom scrollbar and minor overrides that Tailwind CDN misses */
-        body { font-family: 'Inter', sans-serif; background-color: #f1f5f9; color: #1e293b; }
-        .log-terminal::-webkit-scrollbar { width: 6px; }
-        .log-terminal::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        /* ================================================================
+           CSS CUSTOM PROPERTY SYSTEM — Dark Financial Dashboard
+           ================================================================ */
+        :root {
+            /* Color Palette */
+            --cyan: #00e5ff;
+            --cyan-dim: rgba(0, 229, 255, 0.12);
+            --cyan-glow: rgba(0, 229, 255, 0.25);
+            --text-primary: #e8edf5;
+            --text-secondary: #7a8fa6;
+            --text-muted: #4a5a6e;
+            --bg-base: #080d14;
+            --bg-page: #0a0f1a;
+            --bg-card: #111827;
+            --bg-card-hover: #141f30;
+            --bg-surface: #1a2332;
+            --bg-elevated: #1e2d42;
+            --border-dim: #1a2740;
+            --border-bright: #2a4060;
+            --border-cyan: rgba(0, 229, 255, 0.3);
+            --pass: #10b981;
+            --pass-bg: rgba(16, 185, 129, 0.1);
+            --fail: #ef4444;
+            --fail-bg: rgba(239, 68, 68, 0.1);
+            --warn: #f59e0b;
+            --warn-bg: rgba(245, 158, 11, 0.1);
+            --accent-blue: #3b82f6;
+            --accent-blue-bg: rgba(59, 130, 246, 0.12);
+            --accent-amber: #f59e0b;
+            /* Typography */
+            --font-heading: 'Space Grotesk', 'Inter', sans-serif;
+            --font-body: 'Inter', 'Space Grotesk', sans-serif;
+            --font-data: 'JetBrains Mono', 'Fira Code', monospace;
+            /* Shadows */
+            --shadow-card: 0 2px 16px rgba(0, 0, 0, 0.45), 0 0 0 1px rgba(255,255,255,0.03);
+            --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.5);
+            --shadow-cyan: 0 0 20px rgba(0, 229, 255, 0.15);
+        }
+
+        /* ================================================================
+           GLOBAL RESET & BASE
+           ================================================================ */
+        *, *::before, *::after { box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-body);
+            background: var(--bg-page);
+            color: var(--text-primary);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Dark page chrome */
+        .min-h-screen { background: var(--bg-page); }
+
+        /* Nav dark override */
+        nav.bg-white {
+            background: rgba(10, 15, 26, 0.92) !important;
+            border-bottom: 1px solid var(--border-dim) !important;
+            backdrop-filter: blur(16px);
+        }
+        nav .text-gray-900 { color: var(--text-primary) !important; }
+        nav .text-gray-700 { color: var(--text-secondary) !important; }
+        nav .border-transparent { border-color: transparent !important; }
+        nav .hover\:border-gray-300:hover { border-color: var(--border-bright) !important; }
+
+        /* Border color overrides for nav */
+        .border-gray-200 { border-color: var(--border-dim) !important; }
+        .border-gray-100 { border-color: var(--border-dim) !important; }
+
+        /* ================================================================
+           LOG TERMINAL — Glassmorphism Dark Terminal
+           ================================================================ */
+        #logTerminal {
+            background: rgba(8, 13, 20, 0.85) !important;
+            border: 1px solid var(--border-dim) !important;
+            border-radius: 14px !important;
+            backdrop-filter: blur(20px);
+            box-shadow: var(--shadow-card), inset 0 1px 0 rgba(255,255,255,0.04);
+            position: relative;
+            overflow: hidden;
+        }
+        #logTerminal::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, var(--cyan-glow), transparent);
+        }
+        #logTerminal .bg-\[\#1e293b\] {
+            background: rgba(14, 20, 32, 0.95) !important;
+            border-bottom: 1px solid var(--border-dim) !important;
+        }
+        /* Animated status dots */
+        .dot-pulse {
+            animation: dotPulse 2s ease-in-out infinite;
+        }
+        @keyframes dotPulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.4; transform: scale(0.85); }
+        }
+        #logTerminal .bg-green-500 { background: var(--pass) !important; }
+        #logTerminal .bg-yellow-500 { background: var(--warn) !important; }
+        #logTerminal .bg-red-500 { background: var(--fail) !important; }
+
+        /* Log entry styles */
+        #logBody {
+            background: transparent !important;
+            font-family: var(--font-data);
+            font-size: 0.8rem;
+            line-height: 1.6;
+        }
+        .log-entry {
+            display: flex;
+            gap: 1rem;
+            padding: 0.3rem 0.5rem;
+            border-radius: 4px;
+            transition: background 0.15s;
+            border-left: 2px solid transparent;
+        }
+        .log-entry:hover { background: rgba(255,255,255,0.03); }
+        .log-entry.info { border-left-color: var(--text-muted); }
+        .log-entry.pass { border-left-color: var(--pass); background: rgba(16, 185, 129, 0.05); }
+        .log-entry.fail { border-left-color: var(--fail); background: rgba(239, 68, 68, 0.05); }
+        .log-entry.warn { border-left-color: var(--warn); background: rgba(245, 158, 11, 0.05); }
+        .log-time { color: var(--text-muted); min-width: 80px; font-size: 0.75rem; }
+        .log-msg { color: var(--text-secondary); }
+        .log-entry.pass .log-msg { color: var(--pass); }
+        .log-entry.fail .log-msg { color: var(--fail); }
+        .log-entry.warn .log-msg { color: var(--warn); }
+
+        /* Log terminal scrollbar */
+        .log-terminal::-webkit-scrollbar { width: 5px; }
+        .log-terminal::-webkit-scrollbar-track { background: transparent; }
+        .log-terminal::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+
+        /* ================================================================
+           STEP CARDS — Professional dark cards with cyan accents
+           ================================================================ */
+        #step1-sectors,
+        #step2-stocks,
+        #step3-analysis {
+            background: var(--bg-card) !important;
+            border: 1px solid var(--border-dim) !important;
+            border-radius: 16px !important;
+            box-shadow: var(--shadow-card);
+            overflow: hidden;
+        }
+
+        /* Left accent stripe on step cards */
+        #step1-sectors { border-left: 3px solid var(--cyan); }
+        #step2-stocks { border-left: 3px solid var(--accent-blue); }
+        #step3-analysis { border-left: 3px solid var(--pass); }
+
+        /* Card header styling */
+        #step1-sectors .px-6,
+        #step2-stocks .px-6 {
+            background: rgba(255,255,255,0.02);
+            border-bottom: 1px solid var(--border-dim);
+        }
+
+        /* Section headings in cards */
+        #step1-sectors h2,
+        #step2-stocks h2 { color: var(--text-primary) !important; }
+        #step3-analysis h2 { color: var(--text-primary) !important; }
+
+        /* ================================================================
+           AI REASONING AREA — Glass panel
+           ================================================================ */
+        #aiReasoningArea {
+            background: rgba(0, 229, 255, 0.04) !important;
+            border: 1px solid var(--border-cyan) !important;
+            border-radius: 12px !important;
+            backdrop-filter: blur(12px);
+        }
+        #aiReasoningArea h3 { color: var(--cyan) !important; }
+        #aiReasoningText { color: var(--text-secondary) !important; }
+
+        /* Loading spinner inside AI reasoning */
+        .loading-state .cyber-spinner {
+            border-color: var(--border-dim) !important;
+            border-top-color: var(--cyan) !important;
+            box-shadow: 0 0 16px var(--cyan-glow) !important;
+        }
+        .loading-state { color: var(--cyan) !important; }
+
+        /* ================================================================
+           SECTOR CHIPS (Watched sectors)
+           ================================================================ */
+        .watched-sector-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.3rem 0.8rem;
+            background: var(--cyan-dim);
+            border: 1px solid var(--border-cyan);
+            border-radius: 20px;
+            color: var(--cyan);
+            font-family: var(--font-data);
+            font-size: 0.78rem;
+            transition: all 0.2s;
+            box-shadow: 0 0 8px rgba(0, 229, 255, 0.08);
+        }
+        .watched-sector-chip:hover { background: rgba(0, 229, 255, 0.18); box-shadow: var(--shadow-cyan); }
+
+        .remove-sector-btn {
+            color: var(--text-muted) !important;
+            transition: color 0.15s;
+            font-size: 1rem;
+            line-height: 1;
+        }
+        .remove-sector-btn:hover { color: var(--fail) !important; }
+
+        /* ================================================================
+           SECTOR CHECKBOX LIST
+           ================================================================ */
+        #sectorsCheckboxList { gap: 0.75rem; }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            cursor: pointer;
+            user-select: none;
+        }
+        .checkbox-label input[type="checkbox"] {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 18px;
+            height: 18px;
+            border: 1.5px solid var(--border-bright);
+            border-radius: 5px;
+            background: var(--bg-surface);
+            cursor: pointer;
+            position: relative;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+        .checkbox-label input[type="checkbox"]:checked {
+            background: var(--cyan);
+            border-color: var(--cyan);
+            box-shadow: 0 0 10px var(--cyan-glow);
+        }
+        .checkbox-label input[type="checkbox"]:checked::after {
+            content: '✓';
+            position: absolute;
+            top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            color: var(--bg-base);
+            font-size: 0.7rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+        .checkbox-label input[type="checkbox"]:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        .checkbox-label span {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            font-family: var(--font-body);
+        }
+        .checkbox-label:hover span { color: var(--text-primary); }
+
+        /* ================================================================
+           CANDIDATE STOCK TABLE
+           ================================================================ */
+        #candidatesTbody { background: transparent !important; }
+
+        .main-row {
+            border-bottom: 1px solid var(--border-dim);
+            transition: background 0.15s;
+        }
+        .main-row:hover { background: rgba(255,255,255,0.025); }
+        .main-row.passed { border-left: 3px solid var(--pass); }
+        .main-row.failed { border-left: 3px solid var(--fail); }
+        .main-row.expanded { background: rgba(255,255,255,0.03); }
+
+        .details-row { background: var(--bg-surface) !important; }
+        .details-content { padding: 1rem 1.5rem; }
+
+        .stock-code-cell {
+            font-family: var(--font-data) !important;
+            color: var(--cyan) !important;
+            font-size: 0.85rem;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+        }
+        .stock-name-cell { color: var(--text-primary) !important; font-weight: 500; }
+        .sector-cell { color: var(--text-secondary) !important; font-size: 0.82rem; }
+
+        /* Expand icon */
+        .expand-icon {
+            display: inline-block;
+            margin-right: 0.5rem;
+            color: var(--text-muted);
+            font-size: 0.6rem;
+            transition: transform 0.2s ease;
+        }
+        .main-row.expanded .expand-icon { transform: rotate(90deg); color: var(--cyan); }
+
+        /* ================================================================
+           STATUS BADGES
+           ================================================================ */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.2rem 0.65rem;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            font-family: var(--font-body);
+            letter-spacing: 0.02em;
+            white-space: nowrap;
+        }
+        .status-badge.status-pending {
+            background: rgba(122, 143, 166, 0.15);
+            color: var(--text-secondary);
+            border: 1px solid rgba(122, 143, 166, 0.2);
+        }
+        .status-badge.status-passed {
+            background: var(--pass-bg);
+            color: var(--pass);
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+        .status-badge.status-failed {
+            background: var(--fail-bg);
+            color: var(--fail);
+            border: 1px solid rgba(239, 68, 68, 0.25);
+        }
+
+        /* ================================================================
+           BUTTONS
+           ================================================================ */
+        .small-btn {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.3rem 0.8rem;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            font-weight: 500;
+            font-family: var(--font-body);
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid transparent;
+        }
+        .small-btn:not(:disabled) {
+            background: var(--accent-blue-bg);
+            color: var(--accent-blue);
+            border-color: rgba(59, 130, 246, 0.3);
+        }
+        .small-btn:not(:disabled):hover {
+            background: rgba(59, 130, 246, 0.22);
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.2);
+        }
+        .small-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .small-btn.outline {
+            background: transparent;
+            color: var(--text-muted);
+            border-color: var(--border-dim);
+        }
+
+        .primary-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.55rem 1.25rem;
+            border-radius: 10px;
+            font-weight: 600;
+            font-family: var(--font-body);
+            cursor: pointer;
+            transition: all 0.2s;
+            border: none;
+            background: linear-gradient(135deg, var(--cyan), #00b8d4);
+            color: var(--bg-base);
+            font-size: 0.85rem;
+            box-shadow: 0 2px 12px rgba(0, 229, 255, 0.25);
+        }
+        .primary-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 20px rgba(0, 229, 255, 0.35);
+            filter: brightness(1.08);
+        }
+        .primary-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; filter: none; }
+
+        .secondary-btn {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.35rem 0.9rem;
+            border-radius: 8px;
+            font-size: 0.78rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid var(--border-bright);
+            background: transparent;
+            color: var(--text-secondary);
+        }
+        .secondary-btn:hover { border-color: var(--cyan); color: var(--cyan); background: var(--cyan-dim); }
+
+        /* Amber batch button */
+        #btnAnalyzeBatch {
+            background: linear-gradient(135deg, #f59e0b, #d97706) !important;
+            color: #fff !important;
+            border: none !important;
+            box-shadow: 0 2px 12px rgba(245, 158, 11, 0.3) !important;
+        }
+        #btnAnalyzeBatch:hover { box-shadow: 0 4px 20px rgba(245, 158, 11, 0.4) !important; filter: brightness(1.08); }
+        #btnAnalyzeBatch:disabled { opacity: 0.45; }
+
+        /* Blue primary action buttons */
+        #btnFetchSectors {
+            background: linear-gradient(135deg, var(--cyan), #00b8d4) !important;
+            color: var(--bg-base) !important;
+            border: none !important;
+            box-shadow: 0 2px 12px rgba(0, 229, 255, 0.25) !important;
+            font-weight: 600;
+        }
+        #btnFetchSectors:hover { filter: brightness(1.1); box-shadow: 0 4px 20px rgba(0, 229, 255, 0.4) !important; }
+        #btnFetchSectors:disabled { opacity: 0.4; }
+
+        /* ================================================================
+           STOCK CARDS (Final Alpha List)
+           ================================================================ */
+        #stockCardsArea { gap: 1.25rem; }
+
+        .stock-card {
+            background: var(--bg-card) !important;
+            border: 1px solid var(--border-dim) !important;
+            border-radius: 16px !important;
+            box-shadow: var(--shadow-card);
+            padding: 1.5rem !important;
+            transition: all 0.25s;
+            position: relative;
+            overflow: hidden;
+        }
+        .stock-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, transparent, var(--cyan-glow), transparent);
+            opacity: 0;
+            transition: opacity 0.25s;
+        }
+        .stock-card:hover {
+            border-color: var(--border-bright) !important;
+            box-shadow: var(--shadow-elevated), var(--shadow-cyan);
+            transform: translateY(-2px);
+        }
+        .stock-card:hover::before { opacity: 1; }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        .stock-name {
+            font-family: var(--font-heading) !important;
+            font-size: 1.15rem !important;
+            color: var(--text-primary) !important;
+        }
+        .stock-code {
+            font-family: var(--font-data) !important;
+            color: var(--cyan) !important;
+            font-size: 0.82rem !important;
+        }
+        .info-text { color: var(--text-secondary) !important; }
+        .sectors-text { color: var(--text-primary) !important; }
+
+        /* Score badge */
+        .score-badge {
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, rgba(0, 229, 255, 0.15), rgba(0, 229, 255, 0.05));
+            border: 1px solid var(--border-cyan);
+            border-radius: 12px;
+            padding: 0.5rem 0.8rem;
+            min-width: 68px;
+            box-shadow: 0 0 16px rgba(0, 229, 255, 0.1);
+        }
+        .score-value {
+            font-family: var(--font-data) !important;
+            font-size: 1.5rem !important;
+            font-weight: 700 !important;
+            color: var(--cyan) !important;
+            line-height: 1;
+        }
+        .score-badge > span:last-child { color: var(--text-muted); font-size: 0.7rem; }
+
+        /* Audit table inside cards */
+        .audit-table { color: var(--text-primary); }
+        .audit-table thead tr { border-bottom: 1px solid var(--border-dim); }
+        .audit-table th {
+            color: var(--text-muted) !important;
+            font-size: 0.72rem !important;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            font-weight: 500;
+        }
+        .audit-table td { color: var(--text-secondary); }
+        .audit-table tbody tr { border-bottom: 1px solid rgba(26, 39, 64, 0.6); }
+        .audit-table tbody tr:last-child { border-bottom: none; }
+        .audit-table tbody tr:hover { background: rgba(255,255,255,0.02); }
+
+        .res-pass { color: var(--pass) !important; font-weight: 600; }
+        .res-fail { color: var(--fail) !important; font-weight: 600; }
+        .res-warn { color: var(--warn) !important; font-weight: 600; }
+
+        /* Trade plan box */
+        .trade-plan-box {
+            background: rgba(0, 229, 255, 0.04) !important;
+            border: 1px dashed var(--border-cyan) !important;
+            border-radius: 10px;
+        }
+        .trade-plan-box h4 { color: var(--cyan) !important; font-family: var(--font-data) !important; }
+        .trade-plan-text { color: var(--text-primary) !important; font-family: var(--font-data) !important; }
+
+        /* DS result container */
+        .ds-result-container {
+            background: rgba(8, 13, 20, 0.8) !important;
+            border: 1px solid var(--border-dim) !important;
+        }
+        .ds-action-box .primary-btn {
+            background: rgba(0, 229, 255, 0.08) !important;
+            color: var(--cyan) !important;
+            border: 1px solid var(--border-cyan) !important;
+            box-shadow: none !important;
+            font-size: 0.8rem;
+        }
+        .ds-action-box .primary-btn:hover {
+            background: rgba(0, 229, 255, 0.16) !important;
+            box-shadow: var(--shadow-cyan) !important;
+            filter: none;
+        }
+
+        /* ================================================================
+           WATCHLIST PAGE
+           ================================================================ */
+        #pageWatchlist { padding-top: 1.5rem; }
+        #pageWatchlist .bg-white {
+            background: var(--bg-card) !important;
+            border: 1px solid var(--border-dim) !important;
+            border-radius: 16px !important;
+            box-shadow: var(--shadow-card);
+        }
+        #pageWatchlist .border-b { border-color: var(--border-dim) !important; }
+        #pageWatchlist h2 { color: var(--text-primary) !important; }
+        #watchlistTbody .main-row { border-left: 3px solid var(--accent-blue); }
+        #watchlistTbody .main-row.held { border-left-color: var(--pass); }
+        #watchlistTbody .main-row.failed { border-left-color: var(--fail); }
+
+        /* Watchlist form inputs */
+        .cyan-input {
+            background: var(--bg-surface) !important;
+            border-color: var(--border-dim) !important;
+            color: var(--text-primary) !important;
+        }
+        .cyan-input:focus { border-color: var(--cyan) !important; box-shadow: 0 0 0 3px var(--cyan-dim) !important; }
+
+        /* ================================================================
+           MARKDOWN CONTENT (AI reports)
+           ================================================================ */
+        .ds-markdown-content { color: var(--text-secondary); line-height: 1.75; }
         .ds-markdown-content p { margin-bottom: 0.75rem; }
-        .ds-markdown-content h3 { font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; color: #0f172a; }
+        .ds-markdown-content h3 { color: var(--text-primary); font-weight: 600; margin-top: 1rem; margin-bottom: 0.5rem; }
         .ds-markdown-content ul { list-style-type: disc; padding-left: 1.5rem; margin-bottom: 0.75rem; }
-        /* Smooth transitions */
+        .ds-markdown-content ol { list-style-type: decimal; padding-left: 1.5rem; margin-bottom: 0.75rem; }
+        .ds-markdown-content li { margin-bottom: 0.3rem; }
+        .ds-markdown-content strong { color: var(--text-primary); font-weight: 600; }
+        .ds-markdown-content code {
+            background: rgba(0, 229, 255, 0.08);
+            padding: 0.1rem 0.4rem;
+            border-radius: 4px;
+            font-family: var(--font-data);
+            font-size: 0.82em;
+            color: var(--cyan);
+        }
+        .ds-markdown-content pre {
+            background: var(--bg-base);
+            padding: 1rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            border: 1px solid var(--border-dim);
+            margin: 0.75rem 0;
+        }
+        .ds-markdown-content pre code { background: none; padding: 0; }
+
+        /* ================================================================
+           MODAL — Dark glass overlay
+           ================================================================ */
+        #commonModal .bg-white {
+            background: var(--bg-card) !important;
+            border: 1px solid var(--border-bright) !important;
+            border-radius: 16px !important;
+        }
+        #commonModal .border-b { border-color: var(--border-dim) !important; }
+        #modalTitle { color: var(--text-primary) !important; }
+        #modalClose { color: var(--text-muted) !important; }
+        #modalClose:hover { color: var(--text-primary) !important; }
+
+        /* ================================================================
+           INPUTS & FORM ELEMENTS (dark overrides)
+           ================================================================ */
+        input[type="text"],
+        input[type="number"],
+        select {
+            background: var(--bg-surface) !important;
+            border-color: var(--border-dim) !important;
+            color: var(--text-primary) !important;
+        }
+        input[type="text"]:focus,
+        input[type="number"]:focus,
+        select:focus {
+            border-color: var(--cyan) !important;
+            box-shadow: 0 0 0 3px var(--cyan-dim) !important;
+            outline: none;
+        }
+        input::placeholder { color: var(--text-muted) !important; }
+
+        /* ================================================================
+           NAV USER AVATAR
+           ================================================================ */
+        .bg-slate-800 { background: var(--bg-elevated) !important; }
+
+        /* ================================================================
+           AMBER INFO BANNER (step 2)
+           ================================================================ */
+        .bg-amber-50, .bg-amber-100 {
+            background: rgba(245, 158, 11, 0.08) !important;
+            border-color: rgba(245, 158, 11, 0.2) !important;
+            color: var(--warn) !important;
+        }
+
+        /* ================================================================
+           ANIMATIONS & TRANSITIONS
+           ================================================================ */
+        @keyframes spin { to { transform: rotate(360deg); } }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        /* Smooth fade-in for stock cards */
+        .stock-card {
+            animation: fadeSlideIn 0.3s ease-out forwards;
+        }
+        @keyframes fadeSlideIn {
+            from { opacity: 0; transform: translateY(12px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Fade enter for transitions */
         .fade-enter { opacity: 0; transform: translateY(10px); }
         .fade-enter-active { opacity: 1; transform: translateY(0); transition: opacity 300ms, transform 300ms; }
+
+        /* ================================================================
+           INLINE VARIABLES FOR SPINNER (used in app.js loading states)
+           ================================================================ */
+        /* These are referenced via var() in app.js inline styles */
+        :root {
+            --border-dim: #1a2740;
+            --cyan: #00e5ff;
+            --text-secondary: #7a8fa6;
+            --font-body: 'Inter', sans-serif;
+            --font-data: 'JetBrains Mono', monospace;
+            --text-primary: #e8edf5;
+            --border-bright: #2a4060;
+            --bg-surface: #1a2332;
+            --accent-blue: #3b82f6;
+            --shadow-sm: 0 1px 3px rgba(0,0,0,0.3);
+        }
+
+        /* ================================================================
+           SCROLLBAR — Global dark scrollbars
+           ================================================================ */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* ================================================================
+           TABLE OVERRIDES — Dark theme
+           ================================================================ */
+        .divide-gray-200 > * + * { border-color: var(--border-dim) !important; }
+        .bg-gray-50 { background: var(--bg-surface) !important; }
+        .text-gray-500 { color: var(--text-secondary) !important; }
+        .text-gray-900 { color: var(--text-primary) !important; }
+        .text-gray-700 { color: var(--text-secondary) !important; }
+        .bg-white { background: transparent !important; }
+        .border-gray-200 { border-color: var(--border-dim) !important; }
+        .border-gray-300 { border-color: var(--border-bright) !important; }
+
+        /* Watched sectors area */
+        #sectorWatchlistArea {
+            background: rgba(255,255,255,0.02) !important;
+            border-color: var(--border-dim) !important;
+        }
+        #sectorWatchlistArea h3 { color: var(--text-primary) !important; }
+
+        /* ================================================================
+           KEY STATUS CHIPS (DeepSeek/Gemini)
+           ================================================================ */
+        .status-chip {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            border: 1px solid var(--border-dim);
+            color: var(--text-muted);
+            background: transparent;
+            transition: all 0.2s;
+        }
+        .status-chip.active {
+            color: var(--pass);
+            border-color: rgba(16, 185, 129, 0.35);
+            background: var(--pass-bg);
+            box-shadow: 0 0 8px rgba(16, 185, 129, 0.15);
+        }
+
+        /* ================================================================
+           INNER REPORT CONTAINERS
+           ================================================================ */
+        .inner-report-container { margin-top: 1rem; overflow-x: auto; }
+        .inner-report-container.failed-report {
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 8px;
+            padding: 1rem;
+            background: var(--fail-bg);
+        }
+        .inner-report-empty {
+            color: var(--text-muted);
+            font-style: italic;
+            text-align: center;
+            padding: 1rem;
+            font-size: 0.85rem;
+        }
+
+        /* ================================================================
+           SECTOR SELECTION AREA
+           ================================================================ */
+        #sectorSelectionArea {
+            border-top: 1px solid var(--border-dim) !important;
+        }
+        #sectorSelectionArea h3 { color: var(--text-primary) !important; }
     </style>
 </head>
 <body class="min-h-screen flex flex-col">
