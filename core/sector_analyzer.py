@@ -11,6 +11,7 @@ from .data_fetcher import (
     get_sector_snapshot,
     get_latest_macro_news,
     get_sector_fund_flow_top,
+    _load_sw_sector_map,
 )
 
 
@@ -18,7 +19,11 @@ from .data_fetcher import (
 # 主提示词：四维数据 + AI只输出板块名称（无股票代码）
 # ──────────────────────────────────────────────────
 def _build_prompt(
-    market_data: dict, sectors_data: list, macro_news: str, sector_fund_flow: str
+    market_data: dict,
+    sectors_data: list,
+    macro_news: str,
+    sector_fund_flow: str,
+    sw_sector_names: list[str] | None = None,
 ) -> str:
     today = datetime.now().strftime("%Y年%m月%d日")
 
@@ -86,7 +91,10 @@ def _build_prompt(
         "#### 【分析要求】\n\n"
         "1. 结合涨幅前20和资金净流入前10，寻找表象和内在共振的板块。\n"
         "2. 用新闻验证资金流向是否与政策主线一致。\n"
-        "3. 绝对排除防守型板块：银行、房地产、白酒、证券、保险不在推荐范围内。\n\n"
+        "3. 绝对排除防守型板块：银行、房地产、白酒、证券、保险不在推荐范围内。\n"
+        "4. 【关键约束】JSON中板块名称必须为申万行业名称，参考范围：" 
+        + (", ".join(sw_sector_names[:50]) if sw_sector_names else "半导体、银行、电子元件等") 
+        + "等。禁止使用题材概念名（如"人工智能"、"低空经济"、"新能源汽车"等），否则系统无法获取成分股数据。\n\n"
         "#### 【输出格式】\n\n"
         "**第一部分：Markdown 研报**\n"
         "严格按以下结构输出，不废话，直接写标题：\n"
@@ -242,7 +250,8 @@ def analyze_macro_sectors_with_ai() -> dict:
         if isinstance(sector_fund_flow, list)
         else str(sector_fund_flow)
     )
-    prompt = _build_prompt(md, sd, macro_news_str, sector_fund_flow_str)
+    sw_sector_names = list(_load_sw_sector_map().keys())
+    prompt = _build_prompt(md, sd, macro_news_str, sector_fund_flow_str, sw_sector_names)
 
     ds_key = cfg.get("DS_API_KEY", "").strip()
     if ds_key:
