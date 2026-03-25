@@ -11,4 +11,3 @@ yfinance>=0.2.37
 google-genai>=1.0.0
 baostock>=0.8.9
 openai>=1.0.0
-tushare>=1.4.0

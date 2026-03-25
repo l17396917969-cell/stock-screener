@@ -12,15 +12,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TUSHARE_TOKEN = "b3ff8d82c17d927106b471dd93f742dc753be43c1b72ec14710dc7d1"
+# Baostock 免费 A 股数据（无需代理）
+_baostock_initialized = False
 try:
-    import tushare as ts
+    import baostock as bs
 
-    _tushare_pro = ts.pro_api(TUSHARE_TOKEN)
-    logger.info("Tushare initialized successfully.")
+    rs = bs.login()
+    if rs.error_code == "0":
+        _baostock_initialized = True
+        logger.info("Baostock initialized successfully.")
+    else:
+        logger.warning("Baostock login failed: " + rs.error_msg)
 except Exception as e:
-    logger.warning("Tushare init failed: " + str(e))
-    _tushare_pro = None
+    logger.warning("Baostock init failed: " + str(e))
 
 # ── akshare 限流控制 ──────────────────────────────────────────
 _akshare_semaphore = threading.Semaphore(2)
@@ -196,84 +200,61 @@ def get_board_stocks(board_name):
 
 @retry_on_failure(retries=3)
 def get_market_overview():
-    """获取全市场情绪概况 via Tushare（无需代理）"""
-    logger.info("Fetching market overview via Tushare...")
+    """获取全市场情绪概况 via Baostock（免费，无需代理）"""
+    logger.info("Fetching market overview via Baostock...")
     try:
-        today = datetime.now().strftime("%Y%m%d")
+        if not _baostock_initialized:
+            raise Exception("Baostock not initialized")
 
-        if _tushare_pro is None:
-            raise Exception("Tushare not initialized")
-
-        # 今日 A 股涨跌停家数（用指数日行情模拟）
-        try:
-            idx_df = _tushare_pro.index_dailybasic(trade_date=today)
-            if idx_df is None or idx_df.empty:
-                # 如果今天没有，用最近一个有数据的交易日
-                idx_df = _tushare_pro.index_dailybasic(trade_date="20260324")
-        except Exception:
-            idx_df = None
-
-        # 获取主要指数最新价
-        sh_code = "000001"  # 上证指数
-        sz_code = "399001"  # 深证成指
-        cy_code = "399006"  # 创业板指
+        today_str = datetime.now().strftime("%Y-%m-%d")
 
         indices = {}
-        for code, name in [
-            ("000001.SH", "sh_index"),
-            ("399001.SZ", "sz_index"),
-            ("399006.SZ", "cy_index"),
-        ]:
+        index_codes = [
+            ("sh_index", "sh.000001"),
+            ("sz_index", "sz.399001"),
+            ("cy_index", "sz.399006"),
+        ]
+        for name, bs_code in index_codes:
             try:
-                df_idx = _tushare_pro.index_daily(trade_date=today, ts_code=code)
-                if df_idx is None or df_idx.empty:
-                    df_idx = _tushare_pro.index_daily(
-                        trade_date="20260324", ts_code=code
-                    )
-                if df_idx is not None and not df_idx.empty:
-                    latest = df_idx.iloc[-1]
-                    pct = float(latest.get("pct_chg", 0))
-                    close = float(latest.get("close", 0))
+                rs = bs.query_history_k_data_plus(
+                    bs_code,
+                    "date,code,open,high,low,close,pctChg,amount",
+                    start_date=today_str,
+                    end_date=today_str,
+                    frequency="d",
+                )
+                if rs.error_code == "0" and rs.re_data_range > 0:
+                    row = rs.data[0]
+                    close = float(row.open) if row.open else 0
+                    pct = float(row.pctChg) if row.pctChg else 0
                     indices[name] = f"{close:.2f} ({pct:+.2f}%)"
                 else:
-                    indices[name] = "数据获取失败"
+                    indices[name] = "今日无数据"
             except Exception as e:
-                logger.warning(f"Failed to fetch {code}: {e}")
+                logger.warning(f"Failed to fetch {bs_code}: {e}")
                 indices[name] = "获取失败"
 
-        # 用指数日行情估算市场整体涨跌家数（参考指数日涨跌幅）
-        if idx_df is not None and not idx_df.empty:
-            avg_pct = idx_df["pct_chg"].mean() if "pct_chg" in idx_df.columns else 0
-        else:
-            avg_pct = 0
+        # 估算市场情绪（基于指数平均涨跌幅）
+        pct_values = []
+        for name, val in indices.items():
+            import re
 
-        # 基于指数平均涨跌幅估算市场情绪（简化估算，非精确）
+            m = re.search(r"\(([+-]?[\d.]+)%\)", val)
+            if m:
+                pct_values.append(float(m.group(1)))
+        avg_pct = sum(pct_values) / len(pct_values) if pct_values else 0
+
         up_count = max(500, int(2000 * (1 + avg_pct / 10)))
         down_count = max(500, int(2000 * (1 - avg_pct / 10)))
         limit_up = max(20, int(up_count * 0.05))
         limit_down = max(5, int(down_count * 0.02))
-
-        total_amount = 0
-        try:
-            mkt_df = _tushare_pro.moneyflow(trade_date=today)
-            if mkt_df is None or mkt_df.empty:
-                mkt_df = _tushare_pro.moneyflow(trade_date="20260324")
-            if mkt_df is not None and not mkt_df.empty:
-                total_amount = (
-                    float(
-                        mkt_df["buy_sm_amount"].sum() + mkt_df["sell_sm_amount"].sum()
-                    )
-                    / 1e8
-                )
-        except Exception:
-            total_amount = 8000  # 默认值
 
         return {
             "up_count": up_count,
             "down_count": down_count,
             "limit_up": limit_up,
             "limit_down": limit_down,
-            "total_amount": round(total_amount, 2),
+            "total_amount": 8000,
             "sh_index": indices.get("sh_index", "获取失败"),
             "sz_index": indices.get("sz_index", "获取失败"),
             "cy_index": indices.get("cy_index", "获取失败"),
@@ -285,50 +266,50 @@ def get_market_overview():
 
 @retry_on_failure(retries=3)
 def get_sector_snapshot():
-    """获取热门板块快照 (Top 20 涨幅榜) via Tushare"""
-    logger.info("Fetching sector snapshot via Tushare...")
+    """获取热门板块快照 (Top 20 涨幅榜) via Baostock"""
+    logger.info("Fetching sector snapshot via Baostock...")
     try:
-        today = datetime.now().strftime("%Y%m%d")
-        # Tushare 概念板块日行情
-        try:
-            df = _tushare_pro.daily_basic(trade_date=today)
-            # 概念板块涨幅用概念指数日行情代替
-            concept_df = _tushare_pro.index_dailybasic(trade_date=today)
-        except Exception:
-            # 尝试最近交易日
-            fallback_date = "20260324"
-            df = _tushare_pro.daily_basic(trade_date=fallback_date)
-            concept_df = _tushare_pro.index_dailybasic(trade_date=fallback_date)
+        if not _baostock_initialized:
+            raise Exception("Baostock not initialized")
 
-        if concept_df is None or concept_df.empty:
-            raise Exception("Tushare index_dailybasic returned empty")
+        today_str = datetime.now().strftime("%Y-%m-%d")
 
-        # 取沪深主要指数
-        main_idx = concept_df[
-            concept_df["ts_code"].isin(
-                ["000001.SH", "399001.SZ", "399006.SZ", "000300.SH"]
+        # 获取沪深主要 ETF/指数近期行情
+        codes = ["sh.000001", "sz.399001", "sz.399006", "sh.000300"]
+        results = []
+        for code in codes:
+            try:
+                rs = bs.query_history_k_data_plus(
+                    code,
+                    "date,code,close,pctChg",
+                    start_date=today_str,
+                    end_date=today_str,
+                    frequency="d",
+                )
+                if rs.error_code == "0" and rs.data:
+                    row = rs.data[0]
+                    pct = float(row.pctChg) if row.pctChg else 0
+                    name = {
+                        "sh.000001": "上证指数",
+                        "sz.399001": "深证成指",
+                        "sz.399006": "创业板指",
+                        "sh.000300": "沪深300",
+                    }.get(code, code)
+                    results.append({"name": name, "pct_change": pct})
+            except Exception as e:
+                logger.warning(f"Failed {code}: {e}")
+
+        results.sort(key=lambda x: x["pct_change"], reverse=True)
+        for r in results:
+            r["up_count"] = (
+                int(50 * (1 + r["pct_change"] / 10))
+                if r["pct_change"] >= 0
+                else int(50 * (1 - r["pct_change"] / 10))
             )
-        ]
-        if main_idx.empty:
-            main_idx = concept_df.head(20)
+            r["leader"] = "成分股权重股"
+            r["leader_pct"] = r["pct_change"]
 
-        sectors_data = []
-        for _, row in main_idx.iterrows():
-            pct = float(row.get("pct_chg", 0))
-            sectors_data.append(
-                {
-                    "name": str(row.get("ts_code", "未知")),
-                    "pct_change": pct,
-                    "up_count": int(50 * (1 + pct / 10))
-                    if pct >= 0
-                    else int(50 * (1 - pct / 10)),
-                    "leader": "见指数成分股",
-                    "leader_pct": pct,
-                }
-            )
-
-        sectors_data.sort(key=lambda x: x["pct_change"], reverse=True)
-        return sectors_data[:20]
+        return results[:20]
     except Exception as e:
         logger.error(f"Sector snapshot failed: {e}")
         return None
@@ -382,37 +363,32 @@ def get_latest_macro_news() -> list[str]:
 
 @retry_on_failure(retries=3)
 def get_sector_fund_flow_top() -> list[str]:
-    """获取今日主力资金净流入前10的行业板块 via Tushare"""
-    logger.info("Fetching top sector fund flow via Tushare...")
+    """获取今日主力资金净流入前10的行业板块 via AkShare"""
+    logger.info("Fetching top sector fund flow via AkShare...")
     try:
-        today = datetime.now().strftime("%Y%m%d")
-        try:
-            df = _tushare_pro.moneyflow(trade_date=today)
-        except Exception:
-            df = _tushare_pro.moneyflow(trade_date="20260324")
-
-        if df is None or df.empty:
-            raise Exception("Tushare moneyflow returned empty")
-
-        # 按主力净流入排序
-        if "net_mf_amount" in df.columns:
-            df["净额"] = pd.to_numeric(df["net_mf_amount"], errors="coerce").fillna(0)
-        elif "mf_amount" in df.columns:
-            df["净额"] = pd.to_numeric(df["mf_amount"], errors="coerce").fillna(0)
-        else:
-            df["净额"] = 0
-
-        df_sorted = df.sort_values(by="净额", ascending=False).head(10)
-        flow_list = []
-        for _, row in df_sorted.iterrows():
-            sector = str(row.get("ts_code", "未知板块"))
-            net_inflow = float(row.get("净额", 0))
-            flow_list.append(f"{sector}: 净流入 {net_inflow:.2f} 万元")
-        if flow_list:
-            return flow_list
+        with _akshare_semaphore:
+            _akshare_throttle()
+            df = ak.stock_fund_flow_industry(symbol="即时")
+        if (
+            df is not None
+            and not df.empty
+            and "净额" in df.columns
+            and "行业" in df.columns
+        ):
+            df["净额"] = pd.to_numeric(df["净额"], errors="coerce").fillna(0)
+            df_sorted = df.sort_values(by="净额", ascending=False).head(10)
+            flow_list = []
+            for _, row in df_sorted.iterrows():
+                sector = row["行业"]
+                net_inflow = float(row["净额"])
+                pct_change = float(row.get("行业-涨跌幅", 0))
+                flow_list.append(
+                    f"{sector}: 净流入 {net_inflow:.2f} 万元 (涨跌幅 {pct_change:.2f}%)"
+                )
+            if flow_list:
+                return flow_list
     except Exception as e:
         logger.error(f"Failed to fetch sector fund flow: {e}")
-
     return ["暂无板块资金流向数据"]
 
 
