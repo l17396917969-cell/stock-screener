@@ -48,7 +48,7 @@ def node_fetch(state: ScreenerState) -> dict:
         return {"error": "无板块可提取成分股", "current_step": 2}
 
     try:
-        from .ai_fallback import get_stocks_from_sectors
+        from .sector_analyzer import get_stocks_from_sectors
 
         stocks, infos = get_stocks_from_sectors(sectors, ai_result)
 
