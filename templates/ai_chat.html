@@ -258,6 +258,21 @@
   .md-content td { padding: 5px 6px; border: 1px solid var(--border); text-align: center; }
   .md-content b { color: var(--accent); }
   .md-content p { margin: 0 0 6px; }
+
+  /* Stock Detail Card */
+  .stock-detail-card { padding: 4px 0; }
+  .sdc-header { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .sdc-name { font-size: 18px; font-weight: 700; }
+  .sdc-code { font-size: 12px; color: var(--muted); }
+  .sdc-score { margin-left: auto; font-size: 28px; font-weight: 800; background: linear-gradient(135deg, var(--primary), var(--accent)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  .sdc-breakdown { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+  .sdc-bar { display: flex; align-items: center; gap: 6px; font-size: 11px; }
+  .sdc-bar span:first-child { width: 32px; text-align: right; color: var(--muted); }
+  .sdc-bar span:last-child { width: 36px; font-size: 10px; color: var(--muted); }
+  .sbc-fill { height: 6px; border-radius: 3px; background: var(--primary); min-width: 2px; transition: width 0.5s; }
+  .sdc-metrics { display: flex; gap: 12px; font-size: 11px; color: var(--muted); margin-bottom: 10px; padding: 8px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+  .sdc-thesis { font-size: 12px; line-height: 1.7; color: var(--text); margin-bottom: 8px; }
+  .sdc-rec { text-align: center; font-size: 14px; font-weight: 700; padding: 6px; border-radius: 8px; background: rgba(99,102,241,0.15); color: var(--primary); }
 </style>
 </head>
 <body>
@@ -379,6 +394,34 @@ function addCards(stocks) {
   scrollDown();
 }
 
+// ── 个股分析大卡片 ──
+function addStockCard(d) {
+  const el = document.createElement('div');
+  el.className = 'msg ai';
+  const bd = d.score_breakdown || {};
+  el.innerHTML = '<div class="stock-detail-card">'
+    + '<div class="sdc-header">'
+    + '<span class="sdc-name">' + (d.resolved_name || '?') + '</span>'
+    + '<span class="sdc-code">' + (d.resolved_code || '') + '</span>'
+    + '<span class="sdc-score">' + (d.total_score || 0) + '</span>'
+    + '</div>'
+    + '<div class="sdc-breakdown">'
+    + '<div class="sdc-bar"><span>估值</span><div class="sbc-fill" style="width:'+(bd['估值']||0)+'%"></div><span>'+(bd['估值']||0)+'/30</span></div>'
+    + '<div class="sdc-bar"><span>质量</span><div class="sbc-fill" style="width:'+(bd['质量']||0)+'%"></div><span>'+(bd['质量']||0)+'/40</span></div>'
+    + '<div class="sdc-bar"><span>成长</span><div class="sbc-fill" style="width:'+(bd['成长']||0)+'%"></div><span>'+(bd['成长']||0)+'/30</span></div>'
+    + '</div>'
+    + '<div class="sdc-metrics">'
+    + '<span>PE ' + ((d.pe||0).toFixed(1)) + '</span>'
+    + '<span>ROE ' + ((d.roe||0).toFixed(1)) + '%</span>'
+    + '<span>📊 ' + (d.csic_sector||'') + '</span>'
+    + '</div>'
+    + (d.ai_thesis ? '<div class="sdc-thesis">🤖 ' + md2html(d.ai_thesis) + '</div>' : '')
+    + (d.recommendation ? '<div class="sdc-rec">' + d.recommendation + '</div>' : '')
+    + '</div>';
+  document.getElementById('chat').appendChild(el);
+  scrollDown();
+}
+
 // ── 思维链时间线 ──
 function addTimelineStep(id, label, title, detail = '', status = 'active') {
   let tl = document.getElementById('timeline');
@@ -418,19 +461,79 @@ function sendMessage() {
   const text = input.value.trim();
   if (!text) return;
 
-  // 显示用户消息
   addMsg(text, 'user');
   input.value = '';
   setStatus(true);
   clearTimeline();
 
-  // ⚡ 只展示 Step 1，让用户知道有动作
+  // 检测是否为个股查询 (6 位数字代码 或 包含"分析/看看/查"等)
+  const codeMatch = text.match(/\b(\d{6})\b/);
+  const isStockQuery = codeMatch || /分析|看看|查一下|怎么看/.test(text);
+
+  if (isStockQuery) {
+    // ── 个股分析 ──
+    let url = '/api/analyze_stock?';
+    if (codeMatch) {
+      url += 'code=' + codeMatch[1];
+    } else {
+      // 提取可能的股票名 (去掉分析/看看等前缀)
+      const name = text.replace(/分析|看看|查一下|怎么看|帮我/g, '').trim();
+      url += 'name=' + encodeURIComponent(name);
+    }
+
+    addTimelineStep('resolve', 'Step 1', '识别股票', '正在解析…', 'active');
+
+    if (eventSource) eventSource.close();
+    eventSource = new EventSource(url);
+
+    eventSource.addEventListener('node_done', e => {
+      const d = JSON.parse(e.data);
+      if (d.node === 'resolve') {
+        addTimelineStep('resolve', 'Step 1', '识别股票',
+          d.resolved_name + ' (' + d.resolved_code + ')', 'done');
+        addTimelineStep('industry', 'Step 2', '产业链', '分析中…', 'active');
+      }
+      if (d.node === 'industry_context') {
+        addTimelineStep('industry', 'Step 2', '产业链',
+          d.csic_sector + ' · ' + (d.peers||[]).length + ' 同行', 'done');
+        addTimelineStep('fetch', 'Step 3', '财务数据', 'yfinance…', 'active');
+      }
+      if (d.node === 'fetch_data') {
+        addTimelineStep('fetch', 'Step 3', '财务数据', '已获取', 'done');
+        addTimelineStep('score', 'Step 4-6', '估值·质量·成长', '计算中…', 'active');
+      }
+      if (d.node === 'valuation' || d.node === 'quality' || d.node === 'growth') {
+        const stepEl = document.getElementById('step-score');
+        if (stepEl) {
+          stepEl.querySelector('.step-detail').textContent =
+            'PE ' + (d.pe||'?') + ' | ROE ' + (d.roe||'?') + '%';
+        }
+      }
+      if (d.node === 'ai_thesis') {
+        addTimelineStep('score', 'Step 4-6', '估值·质量·成长',
+          '评分 ' + (d.total_score||0) + ' · ' + (d.recommendation||''), 'done');
+        addStockCard(d);
+        setStatus(false);
+        eventSource.close();
+      }
+      if (d.error) {
+        addTimelineStep(d.node, '✕', d.node, d.error, 'fail');
+      }
+    });
+
+    eventSource.addEventListener('error', e => {
+      addMsg('❌ 分析出错', 'system');
+      setStatus(false);
+      eventSource.close();
+    });
+    eventSource.addEventListener('end', () => { setStatus(false); eventSource.close(); });
+    return;
+  }
+
+  // ── 宏观分析 (原有逻辑) ──
   addTimelineStep('macro', 'Step 1', '宏观分析', '正在调用 DeepSeek 分析市场…', 'active');
 
-  // 断开旧连接
   if (eventSource) eventSource.close();
-
-  // 建立 SSE 连接
   eventSource = new EventSource('/api/analyze?' + new URLSearchParams({q: text}));
 
   // ── 节点完成事件 ──

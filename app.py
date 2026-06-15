@@ -34,7 +34,9 @@ from core.deepseek_analyzer import (
 from core.repos.watchlist_repo import watchlist_repo
 from core.repos.sector_watchlist_repo import sector_watchlist_repo
 from core.screener_state import ScreenerState
-from core.stream import run_graph_with_queue, sse_generator
+from core.stream import run_graph_with_queue, sse_generator, run_single_stock_with_queue
+from core.single_stock_state import SingleStockState
+from core.single_stock_graph import build_single_stock_graph
 from config import SCRENNER_CONFIG
 
 app = Flask(__name__)
@@ -917,6 +919,57 @@ def analyze_stream():
     }
 
     event_queue = run_graph_with_queue(initial_state)
+
+    return Response(
+        stream_with_context(sse_generator(event_queue)),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+# ═══════════════════════════════════════════════
+# 个股深度分析 SSE 路由
+# ═══════════════════════════════════════════════
+@app.route("/api/analyze_stock", methods=["GET"])
+@login_required
+def analyze_stock_stream():
+    """个股 7 节点深度分析，通过 SSE 实时推送。"""
+    code = request.args.get("code", "").strip()
+    name = request.args.get("name", "").strip()
+
+    if not code and not name:
+        return jsonify({"success": False, "message": "请提供股票代码或名称"}), 400
+
+    # 加载 DeepSeek Key
+    try:
+        db = get_db()
+        secrets = db.execute(
+            "SELECT ds_key_enc FROM user_secrets WHERE user_id = ?",
+            (current_user.id,),
+        ).fetchone()
+        if secrets and secrets["ds_key_enc"]:
+            ds_key = decrypt_key(secrets["ds_key_enc"])
+            if ds_key:
+                SCRENNER_CONFIG["DS_API_KEY"] = ds_key
+    except Exception as e:
+        logger.error(f"Stock SSE: Failed to load key: {e}")
+
+    initial_state: SingleStockState = {
+        "user_input": code or name,
+        "resolved_code": code,
+        "resolved_name": name,
+        "csic_sector": "",
+        "concept_boards": [],
+        "peers": [],
+        "current_step": 0,
+        "error": None,
+    }
+
+    event_queue = run_single_stock_with_queue(initial_state)
 
     return Response(
         stream_with_context(sse_generator(event_queue)),

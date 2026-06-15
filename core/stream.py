@@ -12,6 +12,8 @@ from typing import Generator
 
 from .screener_state import ScreenerState
 from .screener_graph import build_graph
+from .single_stock_state import SingleStockState
+from .single_stock_graph import build_single_stock_graph
 
 logger = logging.getLogger(__name__)
 
@@ -128,3 +130,48 @@ def sse_generator(
 def _sse(event: str, data: dict) -> str:
     """构建一条 SSE 消息。"""
     return f"event: {event}\ndata: {json.dumps(data, default=str, ensure_ascii=False)}\n\n"
+
+
+def run_single_stock_with_queue(initial_state: dict) -> queue.Queue:
+    """在后台线程运行个股分析 graph，通过 Queue 推送每步结果。"""
+    q: queue.Queue = queue.Queue()
+
+    def _run() -> None:
+        graph = build_single_stock_graph().compile()
+        try:
+            for chunk in graph.stream(initial_state, stream_mode="updates"):
+                for node_name, delta in chunk.items():
+                    payload = {"node": node_name}
+                    if node_name == "resolve":
+                        payload["resolved_code"] = delta.get("resolved_code", "")
+                        payload["resolved_name"] = delta.get("resolved_name", "")
+                    elif node_name == "industry_context":
+                        payload["csic_sector"] = delta.get("csic_sector", "")
+                        payload["peers"] = delta.get("peers", [])
+                    elif node_name == "valuation":
+                        payload["pe"] = delta.get("pe", 0)
+                        payload["pb"] = delta.get("pb", 0)
+                    elif node_name == "quality":
+                        payload["roe"] = delta.get("roe", 0)
+                        payload["gross_margin"] = delta.get("gross_margin", 0)
+                    elif node_name == "growth":
+                        payload["earnings_cagr_3y"] = delta.get("earnings_cagr_3y", 0)
+                    elif node_name == "ai_thesis":
+                        payload["total_score"] = delta.get("total_score", 0)
+                        payload["score_breakdown"] = delta.get("score_breakdown", {})
+                        payload["recommendation"] = delta.get("recommendation", "")
+                        payload["ai_thesis"] = delta.get("ai_thesis", "")
+
+                    if delta.get("error"):
+                        payload["error"] = delta["error"]
+
+                    q.put(("node_done", payload))
+
+            q.put(("end", None))
+        except Exception as e:
+            logger.error(f"Single stock graph failed: {e}")
+            q.put(("error", str(e)))
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    return q
