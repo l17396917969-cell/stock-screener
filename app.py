@@ -876,6 +876,18 @@ def analyze_stream():
     data = request.json or {}
     user_query = data.get("q") or request.args.get("q", "帮我找被低估的A股价值洼地")
 
+    # ── 从数据库加载用户的 DeepSeek API Key ──
+    db = get_db()
+    secrets = db.execute(
+        "SELECT ds_key_enc FROM user_secrets WHERE user_id = ?",
+        (current_user.id,),
+    ).fetchone()
+    old_ds_key = SCRENNER_CONFIG.get("DS_API_KEY", "")
+    if secrets and secrets["ds_key_enc"]:
+        ds_key = decrypt_key(secrets["ds_key_enc"])
+        if ds_key:
+            SCRENNER_CONFIG["DS_API_KEY"] = ds_key
+
     initial_state: ScreenerState = {
         "user_query": user_query,
         "user_id": current_user.id,
