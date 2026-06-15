@@ -94,10 +94,9 @@ def execute_step1_macro(user_id, api_key=None, ds_key=None):
     try:
         state_mgr.update_state(user_id, {"is_analyzing": True, "error": None})
 
-        backend = "DeepSeek" if ds_key else "Gemini"
         _emit_log(
             user_id,
-            f"[SYS] 正在调用 {backend} 大模型进行宏观定调 + 成分股分析...",
+            "[SYS] 正在调用 DeepSeek 大模型进行宏观定调 + 成分股分析...",
             "info",
         )
 

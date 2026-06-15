@@ -19,17 +19,19 @@ def pre_screen_stocks(stock_list: list, stock_infos: dict = None) -> list:
     candidates = []
     for code in stock_list:
         code_str = str(code).zfill(6)
-        
+
         # 仅根据名称剔除 ST
         if stock_infos:
-            name = stock_infos.get(code_str, {}).get('name', '')
-            if 'ST' in name.upper():
+            name = stock_infos.get(code_str, {}).get("name", "")
+            if "ST" in name.upper():
                 logger.debug(f"Filtered ST stock: {code_str} {name}")
                 continue
-        
+
         candidates.append(code_str)
 
-    logger.info(f"Level 1 pre-screening passed: {len(candidates)} / {len(stock_list)} stocks.")
+    logger.info(
+        f"Level 1 pre-screening passed: {len(candidates)} / {len(stock_list)} stocks."
+    )
     return candidates
 
 
@@ -40,7 +42,7 @@ def deep_screen_stock(code: str, index_hist=None) -> tuple[bool, str, dict | Non
     """
     data = get_stock_data_yf(code, index_hist=index_hist)
     if data is None:
-        return False, "yfinance无数据", None
+        return False, "核心行情/财务数据不足", None
 
     cfg = SCRENNER_CONFIG
 
@@ -50,12 +52,18 @@ def deep_screen_stock(code: str, index_hist=None) -> tuple[bool, str, dict | Non
         return False, f"ROE低 ({roe:.1%})" if roe is not None else "ROE数据缺失", data
 
     gross_margin = data.get("gross_margin")
-    if gross_margin is None or gross_margin < cfg["MIN_GROSS_MARGIN"] / 100:
-        return False, f"毛利率低 ({gross_margin:.1%})" if gross_margin is not None else "毛利率数据缺失", data
+    if gross_margin is not None and gross_margin < cfg["MIN_GROSS_MARGIN"] / 100:
+        return (
+            False,
+            f"毛利率低 ({gross_margin:.1%})"
+            if gross_margin is not None
+            else "毛利率数据缺失",
+            data,
+        )
 
     # OCF: 经营现金流
     ocf = data.get("operating_cashflow")
-    if ocf is None or ocf <= 0:
+    if ocf is not None and ocf <= 0:
         return False, f"经营现金流为负 ({ocf})", data
 
     earnings_growth = data.get("earnings_growth")
@@ -85,6 +93,7 @@ def deep_screen_stock(code: str, index_hist=None) -> tuple[bool, str, dict | Non
 
 def screen_stocks(stock_infos, index_hist=None, emit_log=None):
     """执行完整的选股流程"""
+
     def _log(msg, status="info"):
         if emit_log:
             emit_log(msg, status)
@@ -96,7 +105,7 @@ def screen_stocks(stock_infos, index_hist=None, emit_log=None):
     _log(f"[SCAN] 第一轮粗筛完成，{len(candidates)} 只进入深度财务排雷...", "info")
 
     passed_stocks = []
-    passed_data   = {}   # 保存通过股票的数据供后续评分用
+    passed_data = {}  # 保存通过股票的数据供后续评分用
 
     logger.info(f"Starting Level 2 deep screening for {len(candidates)} stocks...")
     for i, code in enumerate(candidates, 1):

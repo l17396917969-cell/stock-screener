@@ -168,28 +168,6 @@ def _call_deepseek(api_key: str, model_name: str, prompt: str) -> str:
 
 
 # ──────────────────────────────────────────────────
-# 方案B：Gemini（支持 Google Search grounding）
-# ──────────────────────────────────────────────────
-def _call_gemini(api_key: str, model_name: str, prompt: str) -> str:
-    from google import genai
-    from google.genai import types
-
-    logger.info("[Backend: Gemini] Using model: " + model_name)
-    client = genai.Client(
-        api_key=api_key, http_options=types.HttpOptions(timeout=120000)
-    )
-    google_search_tool = types.Tool(google_search=types.GoogleSearch())
-    config = types.GenerateContentConfig(
-        tools=[google_search_tool],
-        temperature=0.1,
-    )
-    response = client.models.generate_content(
-        model=model_name, contents=prompt, config=config
-    )
-    return response.text
-
-
-# ──────────────────────────────────────────────────
 # 解析 AI 返回（板块名称+理由，无股票代码）
 # ──────────────────────────────────────────────────
 def _parse_response(text: str) -> dict:
@@ -239,7 +217,7 @@ def _parse_response(text: str) -> dict:
 
 
 # ──────────────────────────────────────────────────
-# 主入口：自动选择 backend
+# 主入口：DeepSeek 宏观分析
 # ──────────────────────────────────────────────────
 def analyze_macro_sectors_with_ai() -> dict:
     cfg = SCRENNER_CONFIG
@@ -262,21 +240,12 @@ def analyze_macro_sectors_with_ai() -> dict:
     )
 
     ds_key = cfg.get("DS_API_KEY", "").strip()
-    if ds_key:
-        ds_model = cfg.get("DS_MODEL", "deepseek-chat")
-        try:
-            logger.info("Trying DeepSeek backend...")
-            raw = _call_deepseek(ds_key, ds_model, prompt)
-            return _parse_response(raw)
-        except Exception as e:
-            logger.error("DeepSeek 调用失败: " + str(e) + "，尝试 Gemini...")
+    if not ds_key:
+        raise ValueError("请提供 DeepSeek API Key（在设置页面配置）。")
 
-    gemini_key = cfg.get("GEMINI_API_KEY", "").strip()
-    if not gemini_key:
-        raise ValueError("请提供 Gemini API Key 或 DeepSeek API Key 中的至少一个。")
-
-    gemini_model = cfg.get("GEMINI_MODEL", "gemini-2.5-pro-preview-06-05")
-    raw = _call_gemini(gemini_key, gemini_model, prompt)
+    ds_model = cfg.get("DS_MODEL", "deepseek-chat")
+    logger.info("调用 DeepSeek 进行宏观分析...")
+    raw = _call_deepseek(ds_key, ds_model, prompt)
     return _parse_response(raw)
 
 

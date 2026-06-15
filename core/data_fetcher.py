@@ -12,6 +12,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_BS_A_SHARE_PREFIXES = ("00", "30", "60", "68")
+
 # Baostock 免费 A 股数据（无需代理）
 _baostock_initialized = False
 try:
@@ -107,6 +109,471 @@ def _to_yf_symbol(code: str) -> str:
         return f"{code}.SS"
     else:
         return f"{code}.SZ"
+
+
+def _to_bs_symbol(code: str) -> str:
+    code_str = str(code).zfill(6)
+    if code_str.startswith(("6", "9")):
+        return f"sh.{code_str}"
+    return f"sz.{code_str}"
+
+
+def _is_a_share_code(code: str) -> bool:
+    code_str = str(code).zfill(6)
+    return code_str.startswith(_BS_A_SHARE_PREFIXES)
+
+
+def _safe_float(value, default=None):
+    try:
+        if value is None or value == "":
+            return default
+        result = float(value)
+        if np.isnan(result):
+            return default
+        return result
+    except Exception:
+        return default
+
+
+def _get_latest_report_period() -> tuple[int, int]:
+    now = datetime.now()
+    quarter = (now.month - 1) // 3
+    year = now.year
+    if quarter == 0:
+        return year - 1, 4
+    return year, quarter
+
+
+def _resultset_to_dataframe(rs) -> pd.DataFrame:
+    if rs is None or getattr(rs, "error_code", "1") != "0":
+        return pd.DataFrame()
+
+    rows = []
+    while rs.next():
+        rows.append(rs.get_row_data())
+
+    if not rows:
+        return pd.DataFrame(columns=getattr(rs, "fields", []))
+    return pd.DataFrame(rows, columns=rs.fields)
+
+
+def _fetch_bs_k_history(
+    code: str, start_date: str | None = None, end_date: str | None = None
+) -> pd.DataFrame:
+    if not _baostock_initialized:
+        return pd.DataFrame()
+
+    bs_code = _to_bs_symbol(code)
+    rs = bs.query_history_k_data_plus(
+        bs_code,
+        "date,code,open,high,low,close,preclose,volume,amount,adjustflag,turn,tradestatus,pctChg,peTTM,pbMRQ,psTTM,pcfNcfTTM,isST",
+        start_date=start_date,
+        end_date=end_date,
+        frequency="d",
+        adjustflag="2",
+    )
+    df = _resultset_to_dataframe(rs)
+    if df.empty:
+        return df
+
+    rename_map = {
+        "open": "Open",
+        "high": "High",
+        "low": "Low",
+        "close": "Close",
+        "preclose": "Preclose",
+        "volume": "Volume",
+        "amount": "Amount",
+        "turn": "TurnoverRate",
+        "pctChg": "PctChg",
+        "peTTM": "PETTM",
+        "pbMRQ": "PBMRQ",
+        "psTTM": "PSTTM",
+        "pcfNcfTTM": "PCFNcfTTM",
+        "isST": "IsST",
+        "tradestatus": "TradeStatus",
+    }
+    df = df.rename(columns=rename_map)
+    numeric_columns = [
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Preclose",
+        "Volume",
+        "Amount",
+        "TurnoverRate",
+        "PctChg",
+        "PETTM",
+        "PBMRQ",
+        "PSTTM",
+        "PCFNcfTTM",
+        "IsST",
+        "TradeStatus",
+    ]
+    for column in numeric_columns:
+        if column in df.columns:
+            df[column] = pd.to_numeric(df[column], errors="coerce")
+    if "date" in df.columns:
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.sort_values("date").reset_index(drop=True)
+    return df
+
+
+def _fetch_bs_financial_snapshot(code: str) -> dict:
+    if not _baostock_initialized:
+        return {}
+
+    bs_code = _to_bs_symbol(code)
+    year, quarter = _get_latest_report_period()
+
+    for offset in range(6):
+        target_year = year
+        target_quarter = quarter - offset
+        while target_quarter <= 0:
+            target_year -= 1
+            target_quarter += 4
+
+        profit_df = _resultset_to_dataframe(
+            bs.query_profit_data(code=bs_code, year=target_year, quarter=target_quarter)
+        )
+        growth_df = _resultset_to_dataframe(
+            bs.query_growth_data(code=bs_code, year=target_year, quarter=target_quarter)
+        )
+        cash_flow_df = _resultset_to_dataframe(
+            bs.query_cash_flow_data(
+                code=bs_code, year=target_year, quarter=target_quarter
+            )
+        )
+        dupont_df = _resultset_to_dataframe(
+            bs.query_dupont_data(code=bs_code, year=target_year, quarter=target_quarter)
+        )
+
+        if any(not df.empty for df in (profit_df, growth_df, cash_flow_df, dupont_df)):
+            return {
+                "profit": profit_df.iloc[0].to_dict() if not profit_df.empty else {},
+                "growth": growth_df.iloc[0].to_dict() if not growth_df.empty else {},
+                "cash_flow": cash_flow_df.iloc[0].to_dict()
+                if not cash_flow_df.empty
+                else {},
+                "dupont": dupont_df.iloc[0].to_dict() if not dupont_df.empty else {},
+                "year": target_year,
+                "quarter": target_quarter,
+            }
+
+    return {}
+
+
+def _fetch_bs_stock_name(code: str) -> str:
+    bs_code = _to_bs_symbol(code)
+    try:
+        rs = bs.query_stock_basic(code=bs_code)
+        df = _resultset_to_dataframe(rs)
+        if not df.empty and "code_name" in df.columns:
+            name = str(df.iloc[0].get("code_name") or "").strip()
+            if name:
+                return name
+    except Exception as e:
+        logger.debug(f"Baostock stock_basic failed for {code}: {e}")
+
+    try:
+        spot_df = ak.stock_zh_a_spot_em()
+        match = spot_df[spot_df["代码"] == str(code).zfill(6)]
+        if not match.empty:
+            return str(match.iloc[0]["名称"])
+    except Exception as e:
+        logger.debug(f"AKShare stock name fallback failed for {code}: {e}")
+
+    return str(code).zfill(6)
+
+
+def _build_limit_up_status(
+    code: str,
+    stock_name: str,
+    current_price: float,
+    prev_close: float,
+    high_price: float,
+    low_price: float,
+) -> str:
+    status = "未涨停"
+    if not prev_close or not current_price:
+        return status
+
+    is_st = "ST" in stock_name.upper()
+    is_star_or_chinext = str(code).startswith(("688", "300"))
+    limit_pct = 5.0 if is_st else (20.0 if is_star_or_chinext else 10.0)
+
+    limit_up_price = round(prev_close * (1 + limit_pct / 100), 2)
+    limit_down_price = round(prev_close * (1 - limit_pct / 100), 2)
+
+    if current_price >= limit_up_price - 0.01:
+        if current_price == high_price and current_price == low_price:
+            return "一字涨停"
+        return "涨停"
+    if current_price <= limit_down_price + 0.01:
+        if current_price == high_price and current_price == low_price:
+            return "一字跌停"
+        return "跌停"
+    if high_price >= limit_up_price - 0.01:
+        return "曾涨停(炸板)"
+    if low_price <= limit_down_price + 0.01:
+        return "曾跌停(撬板)"
+    return status
+
+
+def _build_bs_stock_payload(
+    code: str, hist: pd.DataFrame, financials: dict, index_hist=None
+) -> dict | None:
+    if hist is None or hist.empty or len(hist) < 60:
+        return None
+
+    profit = financials.get("profit", {})
+    growth = financials.get("growth", {})
+    cash_flow = financials.get("cash_flow", {})
+    dupont = financials.get("dupont", {})
+
+    ma5 = hist["Close"].rolling(5).mean().iloc[-1]
+    ma10 = hist["Close"].rolling(10).mean().iloc[-1]
+    ma20 = hist["Close"].rolling(20).mean().iloc[-1]
+    ma60 = hist["Close"].rolling(60).mean().iloc[-1]
+
+    latest_row = hist.iloc[-1]
+    current_price = float(latest_row["Close"])
+    prev_close = _safe_float(latest_row.get("Preclose"), None)
+    if prev_close is None and len(hist) > 1:
+        prev_close = float(hist["Close"].iloc[-2])
+    if prev_close is None:
+        prev_close = current_price
+
+    high_price = float(latest_row["High"])
+    low_price = float(latest_row["Low"])
+    vol_today = _safe_float(latest_row.get("Volume"), 0.0) or 0.0
+    amount_today = _safe_float(latest_row.get("Amount"), 0.0) or 0.0
+    turnover_rate = _safe_float(latest_row.get("TurnoverRate"), 0.0)
+    pe_ttm = _safe_float(latest_row.get("PETTM"), None)
+
+    vol_5d_avg = hist["Volume"].iloc[-6:-1].mean() if len(hist) > 5 else vol_today
+    volume_ratio = vol_today / vol_5d_avg if vol_5d_avg and vol_5d_avg > 0 else 1.0
+    vwap_approx = amount_today / vol_today if vol_today > 0 else current_price
+
+    stock_name = _fetch_bs_stock_name(code)
+    limit_up_status = _build_limit_up_status(
+        code=code,
+        stock_name=stock_name,
+        current_price=current_price,
+        prev_close=prev_close,
+        high_price=high_price,
+        low_price=low_price,
+    )
+
+    total_share = _safe_float(profit.get("totalShare"), None)
+    liqa_share = _safe_float(profit.get("liqaShare"), None)
+    market_cap = (
+        current_price * total_share if total_share and total_share > 0 else None
+    )
+
+    net_profit = _safe_float(profit.get("netProfit"), None)
+    cfo_to_np = _safe_float(cash_flow.get("CFOToNP"), None)
+    operating_cashflow = (
+        net_profit * cfo_to_np
+        if net_profit is not None and cfo_to_np is not None
+        else None
+    )
+    fcf = operating_cashflow
+
+    roe = _safe_float(profit.get("roeAvg"), _safe_float(dupont.get("dupontROE"), None))
+    roic = _safe_float(dupont.get("dupontROE"), roe)
+    earnings_growth = _safe_float(
+        growth.get("YOYNI"), _safe_float(growth.get("YOYPNI"), None)
+    )
+    revenue_growth = _safe_float(growth.get("YOYAsset"), None)
+    gross_margin = _safe_float(profit.get("gpMargin"), None)
+
+    return {
+        "code": str(code).zfill(6),
+        "ticker": _to_bs_symbol(code),
+        "name": stock_name,
+        "limit_up_status": limit_up_status,
+        "price": current_price,
+        "prev_close": prev_close,
+        "high": high_price,
+        "low": low_price,
+        "volume": vol_today / 100,
+        "amount": amount_today / 10000,
+        "change_pct": ((current_price - prev_close) / prev_close) * 100
+        if prev_close
+        else 0,
+        "market_cap": market_cap,
+        "pe_ttm": pe_ttm,
+        "turnover_rate": turnover_rate,
+        "volume_ratio": volume_ratio,
+        "roe": roe,
+        "roic": roic,
+        "earnings_growth": earnings_growth,
+        "revenue_growth": revenue_growth,
+        "gross_margin": gross_margin,
+        "fcf": fcf,
+        "operating_cashflow": operating_cashflow,
+        "ma": {"ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60},
+        "vwap": vwap_approx,
+        "adx": calculate_adx(hist),
+        "boll_pct_b": calculate_bollinger_bands(hist),
+        "vcp_ratio": calculate_vcp(hist),
+        "rps": calculate_rps(hist, index_hist) if index_hist is not None else 1.0,
+        "macd_status": calculate_macd(hist),
+        "kdj_j": calculate_kdj(hist),
+        "sr_levels": calculate_support_resistance(hist),
+        "money_flow": get_money_flow_data(code),
+        "short_ratio": None,
+        "float_shares": liqa_share,
+        "hist": hist,
+    }
+
+
+def _get_stock_data_bs(code: str, index_hist=None) -> dict | None:
+    if not _baostock_initialized or not _is_a_share_code(code):
+        return None
+
+    try:
+        hist = _fetch_bs_k_history(
+            str(code).zfill(6),
+            start_date=(datetime.now() - timedelta(days=420)).strftime("%Y-%m-%d"),
+            end_date=datetime.now().strftime("%Y-%m-%d"),
+        )
+        if hist.empty:
+            return None
+        financials = _fetch_bs_financial_snapshot(str(code).zfill(6))
+        return _build_bs_stock_payload(
+            str(code).zfill(6), hist, financials, index_hist=index_hist
+        )
+    except Exception as e:
+        logger.error(f"Baostock fetch error for {code}: {e}")
+        return None
+
+
+def _get_index_data_yf(symbol="000001.SS"):
+    _yf_rate_limit_wait()
+    t = yf.Ticker(symbol)
+    try:
+        return t.history(period="1mo")
+    except Exception as e:
+        if _check_yf_rate_limit(str(e)):
+            return None
+        raise
+
+
+def _get_stock_data_yf_fallback(code: str, index_hist=None) -> dict | None:
+    _yf_rate_limit_wait()
+
+    ticker = _to_yf_symbol(code)
+    try:
+        t = yf.Ticker(ticker)
+
+        try:
+            info = t.info or {}
+        except Exception as e:
+            if _check_yf_rate_limit(str(e)):
+                return None
+            raise
+
+        try:
+            hist = t.history(period="1y")
+        except Exception as e:
+            if _check_yf_rate_limit(str(e)):
+                return None
+            logger.debug(f"{code} hist fetch error: {e}")
+            return None
+
+        if hist is None or len(hist) < 60:
+            logger.debug(
+                f"{code} hist is None or too short: {len(hist) if hist is not None else 0}"
+            )
+            return None
+
+        ma5 = hist["Close"].rolling(5).mean().iloc[-1]
+        ma10 = hist["Close"].rolling(10).mean().iloc[-1]
+        ma20 = hist["Close"].rolling(20).mean().iloc[-1]
+        ma60 = hist["Close"].rolling(60).mean().iloc[-1]
+
+        current_price = (
+            info.get("currentPrice")
+            or info.get("regularMarketPrice")
+            or float(hist["Close"].iloc[-1])
+        )
+        vwap_approx = (
+            float(hist["High"].iloc[-1])
+            + float(hist["Low"].iloc[-1])
+            + float(hist["Close"].iloc[-1])
+        ) / 3
+        prev_close = float(hist["Close"].iloc[-2]) if len(hist) > 1 else current_price
+
+        vol_today = hist["Volume"].iloc[-1]
+        vol_5d_avg = hist["Volume"].iloc[-6:-1].mean() if len(hist) > 5 else vol_today
+        volume_ratio = vol_today / vol_5d_avg if vol_5d_avg and vol_5d_avg > 0 else 1.0
+
+        stock_name = code
+        try:
+            spot_df = ak.stock_zh_a_spot_em()
+            match = spot_df[spot_df["代码"] == code]
+            if not match.empty:
+                stock_name = match.iloc[0]["名称"]
+            else:
+                stock_name = info.get("shortName") or info.get("longName") or code
+        except Exception:
+            stock_name = info.get("shortName") or info.get("longName") or code
+
+        limit_up_status = _build_limit_up_status(
+            code=code,
+            stock_name=stock_name,
+            current_price=current_price,
+            prev_close=prev_close,
+            high_price=float(hist["High"].iloc[-1]),
+            low_price=float(hist["Low"].iloc[-1]),
+        )
+
+        return {
+            "code": code,
+            "ticker": ticker,
+            "name": stock_name,
+            "limit_up_status": limit_up_status,
+            "price": current_price,
+            "prev_close": prev_close,
+            "high": hist["High"].iloc[-1],
+            "low": hist["Low"].iloc[-1],
+            "volume": vol_today / 100,
+            "amount": (vol_today * vwap_approx) / 10000,
+            "change_pct": ((current_price - prev_close) / prev_close) * 100
+            if prev_close
+            else 0,
+            "market_cap": info.get("marketCap"),
+            "pe_ttm": info.get("trailingPE"),
+            "turnover_rate": info.get("floatShares")
+            and (vol_today / info.get("floatShares") * 100),
+            "volume_ratio": volume_ratio,
+            "roe": info.get("returnOnEquity"),
+            "roic": info.get("returnOnAssets"),
+            "earnings_growth": info.get("earningsGrowth"),
+            "revenue_growth": info.get("revenueGrowth"),
+            "gross_margin": info.get("grossMargins"),
+            "fcf": info.get("freeCashflow"),
+            "operating_cashflow": info.get("operatingCashflow"),
+            "ma": {"ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60},
+            "vwap": vwap_approx,
+            "adx": calculate_adx(hist),
+            "boll_pct_b": calculate_bollinger_bands(hist),
+            "vcp_ratio": calculate_vcp(hist),
+            "rps": calculate_rps(hist, index_hist) if index_hist is not None else 1.0,
+            "macd_status": calculate_macd(hist),
+            "kdj_j": calculate_kdj(hist),
+            "sr_levels": calculate_support_resistance(hist),
+            "money_flow": get_money_flow_data(code),
+            "hist": hist,
+        }
+    except Exception:
+        import traceback
+
+        logger.error(f"yfinance error for {code}:\n{traceback.format_exc()}")
+        return None
 
 
 # ── 全量实时行情（新浪接口，无需 Eastmoney 代理） ─────────────
@@ -586,158 +1053,31 @@ def get_money_flow_data(code: str) -> dict:
 
 def get_index_data(symbol="000001.SS"):
     """获取指数数据用于 RPS 计算"""
-    _yf_rate_limit_wait()  # 添加限流等待
-    t = yf.Ticker(symbol)
-    try:
-        return t.history(period="1mo")
-    except Exception as e:
-        if _check_yf_rate_limit(str(e)):
-            return None
-        raise
+    code_map = {
+        "000001.SS": "000001",
+        "399001.SZ": "399001",
+        "399006.SZ": "399006",
+        "000300.SS": "000300",
+    }
+    target_code = code_map.get(symbol, symbol.replace(".SS", "").replace(".SZ", ""))
+    if _baostock_initialized:
+        hist = _fetch_bs_k_history(
+            target_code,
+            start_date=(datetime.now() - timedelta(days=60)).strftime("%Y-%m-%d"),
+            end_date=datetime.now().strftime("%Y-%m-%d"),
+        )
+        if hist is not None and not hist.empty:
+            return hist
+    return _get_index_data_yf(symbol=symbol)
 
 
 def get_stock_data_yf(code: str, index_hist=None) -> dict | None:
     """
     通过 yfinance 获取单只股票 19 个指标所需的原始数据，并计算部分技术指标。
     """
-    _yf_rate_limit_wait()  # 添加限流等待，避免被限流
-
-    ticker = _to_yf_symbol(code)
-    try:
-        t = yf.Ticker(ticker)
-
-        # 先检查是否被限流
-        try:
-            info = t.info or {}
-        except Exception as e:
-            if _check_yf_rate_limit(str(e)):
-                return None
-            raise
-
-        # 始终优先获取 K线历史，若 K线不足 60 天则放弃
-        try:
-            hist = t.history(period="1y")
-        except Exception as e:
-            if _check_yf_rate_limit(str(e)):
-                return None
-            logger.debug(f"{code} hist fetch error: {e}")
-            return None
-
-        if hist is None or len(hist) < 60:
-            logger.debug(
-                f"{code} hist is None or too short: {len(hist) if hist is not None else 0}"
-            )
-            return None
-
-        # 计算技术指标
-        ma5 = hist["Close"].rolling(5).mean().iloc[-1]
-        ma10 = hist["Close"].rolling(10).mean().iloc[-1]
-        ma20 = hist["Close"].rolling(20).mean().iloc[-1]
-        ma60 = hist["Close"].rolling(60).mean().iloc[-1]
-
-        # 今日数据 (增强鲁棒性，yfinance有时拿不到 currentPrice)
-        current_price = (
-            info.get("currentPrice")
-            or info.get("regularMarketPrice")
-            or float(hist["Close"].iloc[-1])
-        )
-        vwap_approx = (
-            float(hist["High"].iloc[-1])
-            + float(hist["Low"].iloc[-1])
-            + float(hist["Close"].iloc[-1])
-        ) / 3
-        prev_close = float(hist["Close"].iloc[-2]) if len(hist) > 1 else current_price
-
-        # 量比计算：今日成交量 / 过去5日平均成交量
-        vol_today = hist["Volume"].iloc[-1]
-        vol_5d_avg = hist["Volume"].iloc[-6:-1].mean() if len(hist) > 5 else vol_today
-        volume_ratio = vol_today / vol_5d_avg if vol_5d_avg and vol_5d_avg > 0 else 1.0
-
-        # 尝试通过 Akshare 获取准确的中文名称
-        stock_name = code
-        try:
-            spot_df = ak.stock_zh_a_spot_em()
-            match = spot_df[spot_df["代码"] == code]
-            if not match.empty:
-                stock_name = match.iloc[0]["名称"]
-            else:
-                stock_name = info.get("shortName") or info.get("longName") or code
-        except:
-            stock_name = info.get("shortName") or info.get("longName") or code
-
-        # 计算涨跌停状态
-        limit_up_status = "未涨停"
-        if prev_close and current_price:
-            is_st = "ST" in stock_name.upper()
-            is_star_or_chinext = code.startswith(("688", "300"))
-            limit_pct = 5.0 if is_st else (20.0 if is_star_or_chinext else 10.0)
-
-            limit_up_price = round(prev_close * (1 + limit_pct / 100), 2)
-            limit_down_price = round(prev_close * (1 - limit_pct / 100), 2)
-
-            high_price = float(hist["High"].iloc[-1])
-            low_price = float(hist["Low"].iloc[-1])
-
-            if current_price >= limit_up_price - 0.01:
-                if current_price == high_price and current_price == low_price:
-                    limit_up_status = "一字涨停"
-                else:
-                    limit_up_status = "涨停"
-            elif current_price <= limit_down_price + 0.01:
-                if current_price == high_price and current_price == low_price:
-                    limit_up_status = "一字跌停"
-                else:
-                    limit_up_status = "跌停"
-            elif high_price >= limit_up_price - 0.01:
-                limit_up_status = "曾涨停(炸板)"
-            elif low_price <= limit_down_price + 0.01:
-                limit_up_status = "曾跌停(撬板)"
-
-        return {
-            "code": code,
-            "ticker": ticker,
-            "name": stock_name,
-            "limit_up_status": limit_up_status,
-            # 基础数据
-            "price": current_price,
-            "prev_close": prev_close,
-            "high": hist["High"].iloc[-1],
-            "low": hist["Low"].iloc[-1],
-            "volume": vol_today / 100,  # 转换为手
-            "amount": (vol_today * vwap_approx) / 10000,  # 转换为万元 (近似)
-            "change_pct": ((current_price - prev_close) / prev_close) * 100
-            if prev_close
-            else 0,
-            "market_cap": info.get("marketCap"),
-            "pe_ttm": info.get("trailingPE"),
-            "turnover_rate": info.get("floatShares")
-            and (vol_today / info.get("floatShares") * 100),
-            "volume_ratio": volume_ratio,
-            # ... 基本面与技术面保持不变
-            "roe": info.get("returnOnEquity"),
-            "roic": info.get("returnOnAssets"),
-            "earnings_growth": info.get("earningsGrowth"),
-            "revenue_growth": info.get("revenueGrowth"),
-            "gross_margin": info.get("grossMargins"),
-            "fcf": info.get("freeCashflow"),
-            "operating_cashflow": info.get("operatingCashflow"),
-            "ma": {"ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60},
-            "vwap": vwap_approx,
-            "adx": calculate_adx(hist),
-            "boll_pct_b": calculate_bollinger_bands(hist),
-            "vcp_ratio": calculate_vcp(hist),
-            "rps": calculate_rps(hist, index_hist) if index_hist is not None else 1.0,
-            # Additional Indicators for DeepSeek short-term AI
-            "macd_status": calculate_macd(hist),
-            "kdj_j": calculate_kdj(hist),
-            "sr_levels": calculate_support_resistance(hist),
-            # 资金面 API 真实数据
-            "money_flow": get_money_flow_data(code),
-            # 历史数据保留以供后续更复杂的计算
-            "hist": hist,
-        }
-    except Exception as e:
-        import traceback
-
-        logger.error(f"yfinance error for {code}:\n{traceback.format_exc()}")
-        return None
+    code_str = str(code).zfill(6)
+    if _is_a_share_code(code_str):
+        bs_result = _get_stock_data_bs(code_str, index_hist=index_hist)
+        if bs_result is not None:
+            return bs_result
+    return _get_stock_data_yf_fallback(code_str, index_hist=index_hist)

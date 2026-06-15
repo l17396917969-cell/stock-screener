@@ -13,10 +13,8 @@ SCRENNER_CONFIG = {
     "MAX_DRAWDOWN": 40.0,              # 最大回撤 (%)
     "EXCLUDED_SECTORS": ["银行", "房地产", "白酒", "证券", "保险"], # 排除板块
     "TARGET_STOCK_COUNT": 5,             # 最终筛选目标数量 3-5只
-    "GEMINI_API_KEY": os.environ.get('GEMINI_API_KEY') or '', # Google Gemini API 密钥
-    "GEMINI_MODEL": "gemini-3.1-pro-preview-customtools", # 支持 Google Search grounding
-    "DS_API_KEY": os.environ.get('DEEPSEEK_API_KEY') or '', # DeepSeek API 密钥
-    "DS_MODEL": "deepseek-chat", # 改为 deepseek-chat 可能知识更新鲜
+    "DS_API_KEY": os.environ.get('DEEPSEEK_API_KEY') or '',  # DeepSeek API 密钥
+    "DS_MODEL": "deepseek-chat",                             # DeepSeek 模型
 }
 
 # 指标评分权重总和100分 (v2.0 - 19指标体系)
