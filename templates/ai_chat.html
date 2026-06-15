@@ -266,7 +266,8 @@
   <div class="logo">📊</div>
   <h1>Stock Screener AI</h1>
   <div class="status"><span class="dot off" id="statusDot"></span><span id="statusText">就绪</span></div>
-  <a href="/logout" style="color:var(--muted);font-size:12px;text-decoration:none;margin-left:8px">⏻</a>
+  <a href="#" onclick="document.getElementById('logoutForm').submit();return false" style="color:var(--muted);font-size:12px;text-decoration:none;margin-left:8px">⏻</a>
+  <form id="logoutForm" method="POST" action="/logout" style="display:none"></form>
 </header>
 
 <div id="chat">
