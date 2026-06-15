@@ -654,17 +654,34 @@ def get_board_stocks(board_name):
     return _get_concept_stocks_fallback(board_name)
 
 
-def _get_concept_stocks_fallback(board_name):
-    """Baostock fallback: query industry constituents by board name."""
+# ── Baostock 行业数据缓存（全量查询太慢，缓存到内存） ──
+_industry_cache: dict | None = None  # pandas DataFrame or None
+
+def _get_industry_cache():
+    """Load Baostock industry data once, cache in memory."""
+    global _industry_cache
+    if _industry_cache is not None:
+        return _industry_cache
     try:
         import baostock as bs
         bs.login()
         rs = bs.query_stock_industry()
         data = rs.get_data()
         bs.logout()
+        if data is not None and not data.empty:
+            _industry_cache = data
+            logger.info(f"Baostock industry cache loaded: {len(data)} entries")
+        return _industry_cache
+    except Exception as e:
+        logger.warning(f"Failed to load Baostock industry cache: {e}")
+        return None
 
+
+def _get_concept_stocks_fallback(board_name):
+    """Baostock fallback: query industry constituents from cache."""
+    try:
+        data = _get_industry_cache()
         if data is None or data.empty:
-            logger.warning(f"Baostock industry data is empty")
             return None
 
         matched = data[data["industry"].str.contains(board_name, na=False)]
