@@ -157,19 +157,69 @@ def _lookup_code(name: str) -> str:
 
 
 # ═══════════════════════════════════════
-# Node 2: 产业链上下文
+# Node 2: 产业链上下文 (本地缓存 + LLM 补全)
 # ═══════════════════════════════════════
 def node_industry_context(state: SingleStockState) -> dict:
-    """从 board_stocks.json 获取 CSIC 行业 + 概念板块; 从 score_store 获取同行评分。"""
+    """从 board_stocks.json 获取 CSIC 行业 + 概念板块; 从 score_store 获取同行评分。
+    本地数据稀疏时调用 DeepSeek LLM 补全产业链上下文。
+    """
     code = state.get("resolved_code", "")
+    name = state.get("resolved_name", "")
     try:
         csic = _get_csic_sector(code)
         concepts = _get_concept_boards(code)
         peers = _get_peers_from_store(code, csic)
-        return {"csic_sector": csic, "concept_boards": concepts, "peers": peers, "current_step": 2}
+
+        # 如果同行数据为空或概念板块少于 2 个，用 LLM 补全
+        industry_context = ""
+        if not peers or len(concepts) < 2:
+            industry_context = _llm_industry_context(code, name, csic, concepts, peers)
+
+        return {
+            "csic_sector": csic,
+            "concept_boards": concepts,
+            "peers": peers,
+            "industry_context": industry_context,  # LLM 生成的产业链上下文
+            "current_step": 2,
+        }
     except Exception as e:
         logger.error(f"industry_context failed: {e}")
         return {"error": f"产业链分析失败: {e}", "current_step": 2}
+
+
+def _llm_industry_context(code: str, name: str, csic: str, concepts: list[str], peers: list[dict]) -> str:
+    """LLM 补全产业链上下文: 上下游、主要竞争对手、行业动态。"""
+    try:
+        from .deepseek_analyzer import _call_deepseek
+        from config import SCRENNER_CONFIG
+        import os
+
+        ds_key = SCRENNER_CONFIG.get("DS_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
+        if not ds_key:
+            return ""
+
+        peer_str = "\n".join(f"{p['name']}({p['code']}) 评分{p['score']}" for p in peers) if peers else "暂无本地评分数据"
+
+        prompt = f"""请分析 A 股股票 {name}({code}) 的产业链地位。
+
+【基本信息】
+行业分类: {csic}
+概念板块: {', '.join(concepts) if concepts else '无本地数据'}
+本地评分同行: {peer_str}
+
+请用中文，150 字以内回答：
+1. 产业链位置: 这家公司在产业链中的位置 (上游/中游/下游)，主要产品/服务
+2. 核心竞争对手: 列出 3-5 家最直接的 A 股竞争对手 (含代码)
+3. 近期行业动态: 该行业近期 1-2 个关键趋势或事件
+
+直接输出分析内容，不需要 JSON 格式。"""
+
+        response = _call_deepseek(ds_key, "deepseek-chat", prompt, temperature=0.3, timeout=15)
+        return response.strip() if response else ""
+
+    except Exception as e:
+        logger.warning(f"LLM industry context failed: {e}")
+        return ""
 
 
 def _get_csic_sector(code: str) -> str:
@@ -347,11 +397,13 @@ def _score_growth(growth: float) -> int:
     return 5
 
 def _build_thesis_prompt(state: SingleStockState) -> str:
+    industry_ctx = state.get("industry_context", "")
     return f"""你是一位价值投资分析师。请基于以下信息对 {state.get("resolved_name", "")}({state.get("resolved_code", "")}) 做研判。
 
 【产业链】
 行业: {state.get("csic_sector", "未知")}
 概念板块: {", ".join(state.get("concept_boards", []))}
+{chr(10) + industry_ctx if industry_ctx else ""}
 
 【估值】
 PE: {state.get("pe", 0):.1f}

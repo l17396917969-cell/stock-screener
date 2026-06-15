@@ -501,9 +501,14 @@ function sendMessage() {
         addTimelineStep('industry', 'Step 2', '产业链', '分析中…', 'active');
       }
       if (d.node === 'industry_context') {
-        addTimelineStep('industry', 'Step 2', '产业链',
-          d.csic_sector + ' · ' + (d.peers||[]).length + ' 同行', 'done');
-        addTimelineStep('fetch', 'Step 3', '财务数据', 'yfinance…', 'active');
+        const peerCount = (d.peers||[]).length;
+        const detail = d.csic_sector + (peerCount ? ' · ' + peerCount + ' 同行' : '');
+        addTimelineStep('industry', 'Step 2', '产业链', detail, 'done');
+        // 如果 LLM 生成了产业链上下文，展示为 AI 消息
+        if (d.industry_context) {
+          addMsg(md2html(d.industry_context), 'ai');
+        }
+        addTimelineStep('fetch', 'Step 3', '财务数据', 'Baostock…', 'active');
       }
       if (d.node === 'fetch_data') {
         addTimelineStep('fetch', 'Step 3', '财务数据', '已获取', 'done');
