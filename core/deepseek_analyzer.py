@@ -90,6 +90,27 @@ PROMPT_TEMPLATE = """### A股多专家联合诊断系统 (CIO 决策模式)
 """
 
 
+def _call_deepseek(api_key: str, model: str, prompt: str, system: str = None, temperature: float = 0.3, timeout: int = 60) -> str:
+    """通用 DeepSeek API 调用 — 个股分析/估值论点等复用。"""
+    if not api_key:
+        return "未配置 API Key"
+    try:
+        url = "https://api.deepseek.com/chat/completions"
+        headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
+        messages = []
+        if system:
+            messages.append({"role": "system", "content": system})
+        messages.append({"role": "user", "content": prompt})
+        payload = {"model": model or "deepseek-chat", "messages": messages, "temperature": temperature}
+        response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        response.raise_for_status()
+        result = response.json()
+        return result["choices"][0]["message"]["content"]
+    except Exception as e:
+        logger.error(f"DeepSeek _call_deepseek failed: {e}")
+        return f"AI 分析暂时不可用: {e}"
+
+
 def generate_short_term_analysis(api_key: str, data: dict) -> str:
     """
     调用 DeepSeek API 生成短线分析报告
