@@ -17,7 +17,8 @@ def load_user(user_id):
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
     if current_user.is_authenticated:
-        return redirect(url_for('index'))
+        next_page = request.args.get('next')
+        return redirect(next_page or url_for('ai_chat'))
     
     if request.method == 'POST':
         username = request.form.get('username')
@@ -35,11 +36,10 @@ def login():
             
             user = User(user_row['id'], user_row['username'], user_row['is_admin'], user_row['is_active'], user_row['must_change_password'])
             login_user(user)
-            
             db.execute("UPDATE users SET last_login_at = ? WHERE id = ?", (time.time(), user.id))
             db.commit()
-            
-            return redirect(url_for('index'))
+            next_page = request.args.get('next')
+            return redirect(next_page or url_for('ai_chat'))
         
         flash('用户名或密码错误', 'error')
         
