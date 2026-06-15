@@ -1,352 +1,415 @@
+"""
+价值投资评分引擎 (Value Investing Scoring Engine)
+格雷厄姆/巴菲特式选股：找被低估、有未来、值得长期持有的 A 股潜力股。
+
+评分体系：估值30分 + 质量40分 + 成长30分 = 100分
+"""
 import pandas as pd
 import numpy as np
 import logging
-from config import SCORING_WEIGHTS
-from .data_fetcher import get_stock_data_yf
+from config import VALUE_SCORING_WEIGHTS
 
 logger = logging.getLogger(__name__)
 
 
 def safe_float(val, default=0.0):
+    """安全转换数值，处理 None/NaN"""
     try:
         if val is None or (isinstance(val, float) and np.isnan(val)):
             return default
         return float(val)
-    except:
+    except Exception:
         return default
 
 
 def score_with_sparse_fallback(value, missing_score, scorer):
+    """
+    数据缺失时给予默认分 + 标记，有数据时走 scorer(value)。
+    scorer 返回 (score_0_10, result_str) 元组。
+    """
     if value is None:
         return missing_score, "⏸ 数据稀疏(供应商未覆盖)"
     return scorer(float(value))
 
 
+def _compute_pe_percentile_from_hist(hist, current_pe):
+    """
+    从历史K线数据中的 PETTM 列计算当前 PE 的历史分位（百分位）。
+    分位越低 = 估值越便宜 = 得分越高。
+    返回 (score_0_10, reason_str) 或 (None, None) 若无法计算。
+    """
+    if hist is None or hist.empty:
+        return None, None
+    if "PETTM" not in hist.columns:
+        return None, None
+
+    pe_series = pd.to_numeric(hist["PETTM"], errors="coerce").dropna()
+    if len(pe_series) < 60 or current_pe is None or current_pe <= 0:
+        return None, None
+
+    # 计算当前PE在历史中的分位（越低越便宜）
+    percentile = (pe_series < current_pe).sum() / len(pe_series) * 100
+
+    if percentile <= 20:
+        return 10, f"[PASS] PE处于历史底部 ({percentile:.0f}%分位, PE={current_pe:.1f})"
+    elif percentile <= 40:
+        return 7, f"📉 PE偏低 ({percentile:.0f}%分位, PE={current_pe:.1f})"
+    elif percentile <= 60:
+        return 5, f"🆗 PE适中 ({percentile:.0f}%分位, PE={current_pe:.1f})"
+    elif percentile <= 80:
+        return 3, f"📈 PE偏高 ({percentile:.0f}%分位, PE={current_pe:.1f})"
+    else:
+        return 1, f"[WARN] PE处于历史高位 ({percentile:.0f}%分位, PE={current_pe:.1f})"
+
+
 def calculate_score(code: str, stock_info: dict, yf_data: dict | None) -> dict | None:
     """
-    19 维度量化审计深度评分逻辑 (v2.0)
-    按照 0-10 分阶梯进行逐项审计，并应用 SCORING_WEIGHTS 权重。
-    结果中包含具体数值，证据中体现具体的数据溯源。
+    价值投资量化评分 (v3.0)
+    估值30分 + 质量40分 + 成长30分 = 100分
+
+    与旧版 calculate_score() 保持相同的函数签名以维持向后兼容。
     """
     if yf_data is None:
         return None
 
     audit_report = []
     weighted_total = 0
+    W = VALUE_SCORING_WEIGHTS  # 权重缩写
 
-    # 提取预先数据 (来自 data_fetcher 计算出的指标)
+    # ── 提取基础数据 ─────────────────────────────────────
     current_price = safe_float(yf_data.get("price"))
-    ma = yf_data.get("ma", {})
-    ma5, ma10, ma20, ma60 = (
-        ma.get("ma5", 0),
-        ma.get("ma10", 0),
-        ma.get("ma20", 0),
-        ma.get("ma60", 0),
-    )
-    vwap = safe_float(yf_data.get("vwap"))
-    vcp_ratio = safe_float(yf_data.get("vcp_ratio", 1.0))
-    rps = safe_float(yf_data.get("rps", 1.0))
-    adx = safe_float(yf_data.get("adx", 0))
-    boll_pct_b = safe_float(yf_data.get("boll_pct_b", 0.5))
+    pe_ttm = safe_float(yf_data.get("pe_ttm"), None)
+    if pe_ttm is None:
+        pe_ttm = None  # 保持 None 语义
+    pb_val = safe_float(yf_data.get("pb"), None)
+    dividend_yield = safe_float(yf_data.get("dividend_yield"), 0) or 0
+    market_cap = safe_float(yf_data.get("market_cap"), None)
+    fcf = safe_float(yf_data.get("fcf"), None)
+    op_cf = safe_float(yf_data.get("operating_cashflow"), None)
+    roe = safe_float(yf_data.get("roe"), None)
+    roic = safe_float(yf_data.get("roic"), None)
+    gross_margin = safe_float(yf_data.get("gross_margin"), None)
+    earnings_growth = safe_float(yf_data.get("earnings_growth"), None)
+    revenue_growth = safe_float(yf_data.get("revenue_growth"), None)
+    net_profit = safe_float(yf_data.get("net_profit"), None)
     hist = yf_data.get("hist")
 
-    # 证据源常数
-    EV_TECH = "YFinance 历史K线演算"
-    EV_INDEX = "YFinance 市场大盘对比"
-    EV_FUND = "YFinance 公司基本面报表"
+    EV_FUND = "YFinance/Baostock 基本面报表"
 
-    # --- 1. 技术面审计 (30%) ---
-    # 1.1 均线趋势
-    if ma5 > ma10 > ma20 > ma60 and ma60 > 0:
-        s1, res1 = 10, f"[PASS] 完全多头排列 (MA20:{ma20:.2f})"
-    elif ma5 > ma20 and ma20 > ma60:
-        s1, res1 = 7, f"[WARN] 部分多头排列 (MA20:{ma20:.2f}, MA60:{ma60:.2f})"
-    elif ma5 > ma20:
-        s1, res1 = 4, f"⏸ 均线缠绕 (MA5:{ma5:.2f}, MA20:{ma20:.2f})"
-    else:
-        s1, res1 = 0, f"[FAIL] 空头排列 (MA20:{ma20:.2f})"
-    ev1 = EV_TECH
+    # ═════════════════════════════════════════════════════
+    # 维度 1: 估值维度 (共 30分)
+    # ═════════════════════════════════════════════════════
 
-    # 1.2 VWAP
-    if current_price > vwap and vwap > 0:
-        s2, res2 = 10, f"[PASS] 现价 > VWAP ({vwap:.2f})"
-    else:
-        s2, res2 = 0, f"[FAIL] 现价 < VWAP ({vwap:.2f})"
-    ev2 = EV_TECH
-
-    # 1.3 VCP 波动收缩
-    if vcp_ratio < 0.8:
-        s3, res3 = 10, f"[PASS] 波动强烈收缩 ({vcp_ratio:.2%})"
-    elif 0.8 <= vcp_ratio <= 1.0:
-        s3, res3 = 6, f"🆗 波动相对稳定 ({vcp_ratio:.2%})"
-    else:
-        s3, res3 = 0, f"[FAIL] 波动异常放大 ({vcp_ratio:.2%})"
-    ev3 = EV_TECH
-
-    # 1.4 RPS 相对强度
-    if rps > 1.2:
-        s4, res4 = 10, f"🚀 极强 (RPS={rps:.2f})"
-    elif 1.0 < rps <= 1.2:
-        s4, res4 = 7, f"[UP] 走强 (RPS={rps:.2f})"
-    elif 0.8 <= rps <= 1.0:
-        s4, res4 = 3, f"[DOWN] 走弱 (RPS={rps:.2f})"
-    else:
-        s4, res4 = 0, f"[FAIL] 极弱 (RPS={rps:.2f})"
-    ev4 = EV_INDEX
-
-    # 1.5 成交量结构 (简易价量配合判定)
-    vol_ratio = 1.0
-    if hist is not None and len(hist) >= 2:
-        price_up = hist["Close"].iloc[-1] > hist["Close"].iloc[-2]
-        vol_up = hist["Volume"].iloc[-1] > hist["Volume"].iloc[-2]
-        vol_val = hist["Volume"].iloc[-1]
-        vol_5ma = hist["Volume"].iloc[-5:].mean() if len(hist) >= 5 else vol_val
-        vol_mult = vol_val / vol_5ma if vol_5ma > 0 else 1.0
-
-        if (price_up and vol_up) or (not price_up and not vol_up):
-            s5, res5 = 10, f"[PASS] 量价配合健康 ({vol_mult:.1f}x均量)"
-        elif price_up and not vol_up:
-            s5, res5 = 5, f"[WARN] 缩量上涨 ({vol_mult:.1f}x均量)"
+    # 1.1 PE历史分位 (6分) —— 越低越便宜
+    pe_hist_score, pe_hist_res = _compute_pe_percentile_from_hist(hist, pe_ttm)
+    if pe_hist_score is None:
+        # 回退到绝对PE估值
+        if pe_ttm is None:
+            s1, res1 = 3, "⏸ 数据稀疏(PE暂缺)"
+        elif pe_ttm < 15:
+            s1, res1 = 10, f"[PASS] PE底部区域 (PE={pe_ttm:.1f})"
+        elif pe_ttm < 25:
+            s1, res1 = 7, f"📉 PE偏低 (PE={pe_ttm:.1f})"
+        elif pe_ttm < 35:
+            s1, res1 = 5, f"🆗 PE适中 (PE={pe_ttm:.1f})"
+        elif pe_ttm < 50:
+            s1, res1 = 3, f"📈 PE偏高 (PE={pe_ttm:.1f})"
         else:
-            s5, res5 = 0, f"[FAIL] 量价背离 ({vol_mult:.1f}x均量)"
+            s1, res1 = 1, f"[WARN] PE高位 (PE={pe_ttm:.1f})"
     else:
-        s5, res5 = 5, "⏸ 数据不足"
-    ev5 = EV_TECH
+        s1, res1 = pe_hist_score, pe_hist_res
+    ev1 = EV_FUND
 
-    # 1.6 ADX 趋势强度
-    if adx > 30:
-        s6, res6 = 10, f"🔥 趋势强劲 (ADX={adx:.1f})"
-    elif 20 <= adx <= 30:
-        s6, res6 = 6, f"🆗 趋势温和 (ADX={adx:.1f})"
+    # 1.2 PB 市净率 (5分) —— 资产折价程度
+    if pb_val is None:
+        s2, res2 = 3, "⏸ 数据稀疏(PB暂缺)"
+    elif pb_val < 1:
+        s2, res2 = 10, f"[PASS] 破净！资产折价 (PB={pb_val:.2f})"
+    elif pb_val < 2:
+        s2, res2 = 8, f"📉 低估值 (PB={pb_val:.2f})"
+    elif pb_val < 3:
+        s2, res2 = 6, f"🆗 合理估值 (PB={pb_val:.2f})"
+    elif pb_val < 5:
+        s2, res2 = 4, f"📈 偏高 (PB={pb_val:.2f})"
+    elif pb_val < 8:
+        s2, res2 = 2, f"[WARN] 高估 (PB={pb_val:.2f})"
     else:
-        s6, res6 = 0, f"⏸ 无明显趋势 (ADX={adx:.1f})"
-    ev6 = EV_TECH
+        s2, res2 = 0, f"[FAIL] 严重高估 (PB={pb_val:.2f})"
+    ev2 = EV_FUND
 
-    # 1.7 布林带位置 (pct_b: 0下轨, 1上轨)
-    if boll_pct_b < 0.3:
-        s7, res7 = 10, f"💎 低位超卖 (布林PctB={boll_pct_b:.2f})"
-    elif 0.3 <= boll_pct_b <= 0.7:
-        s7, res7 = 5, f"🆗 均衡位置 (布林PctB={boll_pct_b:.2f})"
+    # 1.3 PEG 估值性价比 (6分)
+    gr_val = (earnings_growth or 0) * 100  # 转为百分比
+    if pe_ttm is None or earnings_growth is None or gr_val <= 0:
+        s3, res3 = 3, "⏸ 数据稀疏(PEG暂不可比)"
     else:
-        s7, res7 = 0, f"[WARN] 高位超买 (布林PctB={boll_pct_b:.2f})"
-    ev7 = EV_TECH
+        peg = pe_ttm / gr_val if gr_val > 0 else 99
+        if peg < 1.0:
+            s3, res3 = 10, f"[PASS] 低估成长 (PEG={peg:.2f})"
+        elif peg < 1.5:
+            s3, res3 = 7, f"📉 较便宜 (PEG={peg:.2f})"
+        elif peg < 2.0:
+            s3, res3 = 5, f"🆗 合理 (PEG={peg:.2f})"
+        elif peg < 3.0:
+            s3, res3 = 3, f"📈 偏贵 (PEG={peg:.2f})"
+        else:
+            s3, res3 = 0, f"[WARN] 高估/无法计算 (PEG={peg:.2f})"
+    ev3 = EV_FUND
 
-    # --- 2. 基本面审计 (40%) ---
-    # 2.1 ROE 阶梯评分
-    roe_raw = yf_data.get("roe")
-    s8, res8 = score_with_sparse_fallback(
-        roe_raw,
-        5,
+    # 1.4 股息率 (5分) —— 现金回报，防御性指标
+    div_pct = dividend_yield * 100 if dividend_yield else 0
+    if dividend_yield is None or dividend_yield == 0:
+        s4, res4 = 3, "🆗 不分红(成长型公司可接受)"
+    elif div_pct > 4:
+        s4, res4 = 10, f"[PASS] 高股息 ({div_pct:.1f}%)"
+    elif div_pct > 3:
+        s4, res4 = 8, f"📈 丰厚股息 ({div_pct:.1f}%)"
+    elif div_pct > 2:
+        s4, res4 = 6, f"🆗 有分红 ({div_pct:.1f}%)"
+    elif div_pct > 1:
+        s4, res4 = 4, f"📉 微薄分红 ({div_pct:.1f}%)"
+    else:
+        s4, res4 = 2, f"⏸ 象征性分红 ({div_pct:.1f}%)"
+    ev4 = EV_FUND
+
+    # 1.5 自由现金流收益率 (8分) —— 真金白银回报率
+    if fcf is not None and market_cap is not None and market_cap > 0:
+        fcf_yield = fcf / market_cap * 100
+        if fcf_yield > 10:
+            s5, res5 = 10, f"[PASS] 极高FCF收益 ({fcf_yield:.1f}%)"
+        elif fcf_yield > 5:
+            s5, res5 = 8, f"📈 高FCF收益 ({fcf_yield:.1f}%)"
+        elif fcf_yield > 2:
+            s5, res5 = 6, f"🆗 合理FCF收益 ({fcf_yield:.1f}%)"
+        elif fcf_yield > 0:
+            s5, res5 = 4, f"📉 低FCF收益 ({fcf_yield:.1f}%)"
+        else:
+            s5, res5 = 0, f"[FAIL] FCF为负 ({fcf_yield:.1f}%)"
+    else:
+        s5, res5 = 3, "⏸ 数据稀疏(FCF/市值暂缺)"
+    ev5 = EV_FUND
+
+    # ═════════════════════════════════════════════════════
+    # 维度 2: 质量维度 (共 40分)
+    # ═════════════════════════════════════════════════════
+
+    # 2.1 ROE 水平 (8分) —— 股东回报核心
+    s6, res6 = score_with_sparse_fallback(
+        roe,
+        3,
         lambda raw: (
-            (10, f"[PASS] 优秀 ({raw * 100:.1f}%)")
+            (10, f"[PASS] 卓越 ({raw * 100:.1f}%)")
             if raw * 100 > 20
+            else (8, f"📈 优秀 ({raw * 100:.1f}%)")
+            if raw * 100 > 15
             else (6, f"🆗 良好 ({raw * 100:.1f}%)")
-            if 10 <= raw * 100 <= 20
-            else (0, f"[FAIL] 较低 ({raw * 100:.1f}%)")
+            if raw * 100 > 12
+            else (4, f"📉 及格 ({raw * 100:.1f}%)")
+            if raw * 100 > 8
+            else (0, f"[FAIL] 偏低 ({raw * 100:.1f}%)")
+        ),
+    )
+    ev6 = EV_FUND
+
+    # 2.2 ROIC 资本回报率 (7分) —— 剔除杠杆后的真实盈利能力
+    s7, res7 = score_with_sparse_fallback(
+        roic,
+        3,
+        lambda raw: (
+            (10, f"[PASS] 高效率 ({raw * 100:.1f}%)")
+            if raw * 100 > 15
+            else (7, f"📈 较好 ({raw * 100:.1f}%)")
+            if raw * 100 > 10
+            else (5, f"🆗 中等 ({raw * 100:.1f}%)")
+            if raw * 100 > 8
+            else (2, f"[WARN] 偏低 ({raw * 100:.1f}%)")
+        ),
+    )
+    ev7 = EV_FUND
+
+    # 2.3 毛利率稳定性 (6分) —— 护城河宽度
+    s8, res8 = score_with_sparse_fallback(
+        gross_margin,
+        3,
+        lambda raw: (
+            (10, f"[PASS] 宽护城河 ({raw * 100:.1f}%)")
+            if raw * 100 > 40
+            else (7, f"📈 较强定价权 ({raw * 100:.1f}%)")
+            if raw * 100 > 30
+            else (5, f"🆗 盈利中等 ({raw * 100:.1f}%)")
+            if raw * 100 > 20
+            else (2, f"[WARN] 盈利薄弱 ({raw * 100:.1f}%)")
         ),
     )
     ev8 = EV_FUND
 
-    # 2.2 净利增速
-    earnings_growth_raw = yf_data.get("earnings_growth")
-    gr_val = safe_float(earnings_growth_raw) * 100
-    s9, res9 = score_with_sparse_fallback(
-        earnings_growth_raw,
-        5,
+    # 2.4 FCF/净利润比 (7分) —— 利润含金量
+    if net_profit is not None and net_profit > 0 and fcf is not None:
+        fcf_np_ratio = fcf / net_profit
+        if fcf_np_ratio > 1.0:
+            s9, res9 = 10, f"[PASS] 利润含金量极高 (FCF/NP={fcf_np_ratio:.2f})"
+        elif fcf_np_ratio > 0.8:
+            s9, res9 = 8, f"📈 利润质量好 (FCF/NP={fcf_np_ratio:.2f})"
+        elif fcf_np_ratio > 0.5:
+            s9, res9 = 6, f"🆗 利润含金量一般 (FCF/NP={fcf_np_ratio:.2f})"
+        elif fcf_np_ratio > 0:
+            s9, res9 = 4, f"📉 利润含金量低 (FCF/NP={fcf_np_ratio:.2f})"
+        else:
+            s9, res9 = 0, f"[FAIL] 现金流亏损 (FCF/NP={fcf_np_ratio:.2f})"
+    else:
+        s9, res9 = 3, "⏸ 数据稀疏(FCF/NP暂缺)"
+    ev9 = EV_FUND
+
+    # 2.5 负债率/财务健康度 (6分) —— 从PB推测资产结构
+    # 注：完整负债率需资产负债数据，当前以PB作为代理指标
+    # PB低 + 盈利好 → 财务稳健；PB极高 → 可能杠杆过高
+    if pb_val is not None:
+        if pb_val < 1.5:
+            s10, res10 = 10, f"[PASS] 资产扎实 (PB={pb_val:.2f}, 低杠杆)"
+        elif pb_val < 3:
+            s10, res10 = 7, f"📈 财务稳健 (PB={pb_val:.2f})"
+        elif pb_val < 5:
+            s10, res10 = 5, f"🆗 杠杆适中 (PB={pb_val:.2f})"
+        elif pb_val < 8:
+            s10, res10 = 3, f"📉 杠杆偏高 (PB={pb_val:.2f})"
+        else:
+            s10, res10 = 1, f"[WARN] 高杠杆/轻资产 (PB={pb_val:.2f})"
+    else:
+        s10, res10 = 3, "⏸ 数据稀疏(负债率暂缺)"
+    ev10 = EV_FUND
+
+    # 2.6 经营现金流 (6分) —— 造血能力
+    if op_cf is not None and op_cf > 0:
+        if market_cap is not None and market_cap > 0:
+            cf_ratio = op_cf / market_cap * 100
+            if cf_ratio > 5:
+                s11, res11 = 10, f"[PASS] 强劲造血 ({cf_ratio:.1f}% 市值)"
+            elif cf_ratio > 2:
+                s11, res11 = 8, f"📈 良好造血 ({cf_ratio:.1f}% 市值)"
+            elif cf_ratio > 1:
+                s11, res11 = 6, f"🆗 正常造血 ({cf_ratio:.1f}% 市值)"
+            else:
+                s11, res11 = 4, f"📉 造血偏弱 ({cf_ratio:.1f}% 市值)"
+        else:
+            s11, res11 = 7, f"[PASS] 经营现金流为正"
+    elif op_cf is not None and op_cf <= 0:
+        s11, res11 = 0, f"[FAIL] 经营现金流为负"
+    else:
+        s11, res11 = 3, "⏸ 数据稀疏(经营现金流暂缺)"
+    ev11 = EV_FUND
+
+    # ═════════════════════════════════════════════════════
+    # 维度 3: 成长维度 (共 30分)
+    # ═════════════════════════════════════════════════════
+
+    # 3.1 扣非净利润 3年复合增速 (10分) —— 用单年增速作为代理
+    s12, res12 = score_with_sparse_fallback(
+        earnings_growth,
+        3,
         lambda raw: (
             (10, f"🚀 高增长 ({raw * 100:+.1f}%)")
             if raw * 100 > 30
-            else (6, f"[UP] 稳健 ({raw * 100:+.1f}%)")
-            if 10 <= raw * 100 <= 30
-            else (0, f"[FAIL] 负增长/缓慢 ({raw * 100:+.1f}%)")
-        ),
-    )
-    ev9 = EV_FUND
-
-    # 2.3 PEG
-    pe_raw = yf_data.get("pe_ttm")
-    pe = safe_float(pe_raw)
-    if pe_raw is None or earnings_growth_raw is None or gr_val <= 0:
-        s10, res10 = 5, "⏸ 数据稀疏(PEG暂不可比)"
-    else:
-        peg = pe / gr_val if gr_val > 0 else 99
-        if peg < 1.0:
-            s10, res10 = 10, f"[PASS] 低估 (PEG={peg:.2f})"
-        elif 1.0 <= peg <= 2.0:
-            s10, res10 = 5, f"🆗 合理 (PEG={peg:.2f})"
-        else:
-            s10, res10 = 0, f"[WARN] 高估/无法计算 (PEG={peg:.2f})"
-    ev10 = EV_FUND
-
-    # 2.4 毛利率趋势 (简化为当前毛利率水平)
-    gross_margin_raw = yf_data.get("gross_margin")
-    s11, res11 = score_with_sparse_fallback(
-        gross_margin_raw,
-        5,
-        lambda raw: (
-            (10, f"[PASS] 护城河深盾 ({raw * 100:.1f}%)")
-            if raw * 100 > 30
-            else (5, f"🆗 盈利中等 ({raw * 100:.1f}%)")
-            if raw * 100 > 15
-            else (0, f"[FAIL] 盈利薄弱 ({raw * 100:.1f}%)")
-        ),
-    )
-    ev11 = EV_FUND
-
-    # 2.5 ROIC
-    roic_raw = yf_data.get("roic")
-    s12, res12 = score_with_sparse_fallback(
-        roic_raw,
-        5,
-        lambda raw: (
-            (10, f"[PASS] 高效率 ({raw * 100:.1f}%)")
-            if raw * 100 > 15
-            else (6, f"🆗 中等 ({raw * 100:.1f}%)")
-            if 10 <= raw * 100 <= 15
-            else (0, f"[FAIL] 低效 ({raw * 100:.1f}%)")
+            else (7, f"📈 稳健增长 ({raw * 100:+.1f}%)")
+            if raw * 100 > 20
+            else (5, f"🆗 中速增长 ({raw * 100:+.1f}%)")
+            if raw * 100 > 10
+            else (3, f"📉 低速增长 ({raw * 100:+.1f}%)")
+            if raw * 100 > 5
+            else (1, f"[WARN] 停滞/负增长 ({raw * 100:+.1f}%)")
         ),
     )
     ev12 = EV_FUND
 
-    # 2.6 FCF
-    fcf_raw = yf_data.get("fcf")
+    # 3.2 营收增速 (8分) —— 业务扩张能力
     s13, res13 = score_with_sparse_fallback(
-        fcf_raw,
-        5,
+        revenue_growth,
+        3,
         lambda raw: (
-            (10, f"[PASS] 净流出为正 ({raw / 1e8:.1f}亿)")
-            if raw > 0
-            else (0, "[FAIL] 现金流为负")
+            (10, f"📈 高速扩张 ({raw * 100:+.1f}%)")
+            if raw * 100 > 20
+            else (7, f"📈 稳健扩张 ({raw * 100:+.1f}%)")
+            if raw * 100 > 10
+            else (5, f"🆗 温和增长 ({raw * 100:+.1f}%)")
+            if raw * 100 > 5
+            else (3, f"📉 增长放缓 ({raw * 100:+.1f}%)")
+            if raw * 100 > 0
+            else (0, f"[WARN] 营收萎缩 ({raw * 100:+.1f}%)")
         ),
     )
     ev13 = EV_FUND
 
-    # 2.7 行业地位
-    market_cap_raw = yf_data.get("market_cap")
-    s14, res14 = score_with_sparse_fallback(
-        market_cap_raw,
-        5,
-        lambda raw: (
-            (10, f"👑 巨头 (市值{raw / 1e8:.0f}亿)")
-            if raw > 1000e8
-            else (6, f"🐄 中坚 (市值{raw / 1e8:.0f}亿)")
-            if raw > 300e8
-            else (0, f"🐜 小盘 (市值{raw / 1e8:.0f}亿)")
-        ),
-    )
+    # 3.3 研发投入占比 (6分) —— 创新驱动
+    # 注：完整研发数据需从财报附注提取，当前以毛利率作为创新能力的代理
+    # 高毛利率通常意味着高研发/品牌壁垒
+    if gross_margin is not None:
+        gm_pct = gross_margin * 100
+        if gm_pct > 50:
+            s14, res14 = 10, f"[PASS] 极高毛利暗示强研发/品牌壁垒 ({gm_pct:.1f}%)"
+        elif gm_pct > 35:
+            s14, res14 = 7, f"📈 高毛利，创新投入可期 ({gm_pct:.1f}%)"
+        elif gm_pct > 25:
+            s14, res14 = 5, f"🆗 中等毛利 ({gm_pct:.1f}%)"
+        elif gm_pct > 15:
+            s14, res14 = 3, f"📉 低毛利，研发空间有限 ({gm_pct:.1f}%)"
+        else:
+            s14, res14 = 1, f"[WARN] 薄利，创新投入困难 ({gm_pct:.1f}%)"
+    else:
+        s14, res14 = 3, "⏸ 数据稀疏(研发/毛利暂缺)"
     ev14 = EV_FUND
 
-    # 2.8 PE百分位
-    if pe_raw is None:
-        s15, res15 = 5, "⏸ 数据稀疏(PE暂缺)"
-    elif pe > 0 and pe < 15:
-        s15, res15 = 10, f"[PASS] 底部 (PE={pe:.1f})"
-    elif 15 <= pe < 30:
-        s15, res15 = 5, f"🆗 适中 (PE={pe:.1f})"
+    # 3.4 行业天花板 (6分) —— 用市值的行业相对位置作为代理
+    # 中小市值 + 高成长 = 更大空间；大市值 + 低成长 = 接近天花板
+    if market_cap is not None:
+        mc_yi = market_cap / 1e8  # 转为亿元
+        if mc_yi < 100:
+            s15, res15 = 10, f"🌱 小市值，成长空间大 ({mc_yi:.0f}亿)"
+        elif mc_yi < 300:
+            s15, res15 = 8, f"📈 中小市值，空间充足 ({mc_yi:.0f}亿)"
+        elif mc_yi < 1000:
+            s15, res15 = 6, f"🆗 中市值，仍有空间 ({mc_yi:.0f}亿)"
+        elif mc_yi < 3000:
+            s15, res15 = 4, f"📉 大市值，空间收窄 ({mc_yi:.0f}亿)"
+        else:
+            s15, res15 = 2, f"🏢 超大市值，接近天花板 ({mc_yi:.0f}亿)"
     else:
-        s15, res15 = 0, f"[WARN] 高位/亏损 (PE={pe:.1f})"
+        s15, res15 = 3, "⏸ 数据稀疏(市值暂缺)"
     ev15 = EV_FUND
 
-    # --- 3. 资金面审计 (30%) ---
-    # 3.1 换手率
-    to = safe_float(yf_data.get("turnover_rate"))
-    if 3 <= to <= 8:
-        s16, res16 = 10, f"[PASS] 温和活跃 ({to:.1f}%)"
-    elif 1 <= to < 3 or 8 < to <= 15:
-        s16, res16 = 5, f"🆗 交易适度 ({to:.1f}%)"
-    else:
-        s16, res16 = 0, f"[WARN] 冷清或过热 ({to:.1f}%)"
-    ev16 = EV_TECH
-
-    # 获取真实量化资金流动口径
-    mf_data = yf_data.get("money_flow", {})
-
-    # 3.2 陆股通/北向资金流 (历史测算)
-    hsgt = mf_data.get("hsgt_hold_change")
-    ev17 = "AKShare 行情·陆股通明细"
-    if hsgt is not None:
-        if hsgt > 0:
-            s17, res17 = 10, f"[PASS] 外资增仓偏好 (+{hsgt / 1e8:.2f}亿)"
-        elif hsgt < 0:
-            s17, res17 = 0, f"[WARN] 外资减持迹象 ({hsgt / 1e8:.2f}亿)"
-        else:
-            s17, res17 = 5, f"⏸ 外资持平 (0.00)"
-    else:
-        s17, res17 = 5, "⏸ 北向资金(暂无数据)"
-
-    # 3.3 融券变 / 杠杆资金偏好 (利用 YF ShortRatio 或置空)
-    ev18 = "YFinance 交易者行为"
-    sr = safe_float(yf_data.get("short_ratio"), -1)
-    if sr >= 0:
-        if sr > 5:
-            s18, res18 = 0, f"[WARN] 空头占优 (Short={sr:.1f})"
-        else:
-            s18, res18 = 10, f"[PASS] 杠杆常态 (Short={sr:.1f})"
-    else:
-        s18, res18 = 5, "⏸ 融资融券(数据受限)"
-
-    # 3.4 主力单净流入金额
-    ev19 = "AKShare 东方财富·主力资金流"
-    main_in = mf_data.get("main_net_in")
-    if main_in is not None:
-        if main_in > 0:
-            s19, res19 = 10, f"🔥 主力大单流入 (+{main_in / 1e4:.0f}万)"
-        elif main_in < 0:
-            s19, res19 = 0, f"[WARN] 主力大单流出 ({main_in / 1e4:.0f}万)"
-        else:
-            s19, res19 = 5, f"⏸ 主力震荡盘整 (0.00)"
-    else:
-        s19, res19 = 5, "⏸ 主力资金(暂无数据)"
-
-    # 计算加权分
-    # tech_score = (s1+s2+s3+s4+s5+s6+s7) / 70 * 10
-    # fund_score = (s8+s9+s10+s11+s12+s13+s14+s15) / 80 * 10
-    # flow_score = (s16+s17+s18+s19) / 40 * 10
-
-    # 应用 config 中的权重
+    # ── 加权汇总 (直接使用 VALUE_SCORING_WEIGHTS) ─────────
     weighted_total = (
-        s1 / 10 * SCORING_WEIGHTS["MA_TREND"]
-        + s2 / 10 * SCORING_WEIGHTS["VWAP"]
-        + s3 / 10 * SCORING_WEIGHTS["VCP"]
-        + s4 / 10 * SCORING_WEIGHTS["RPS"]
-        + s5 / 10 * SCORING_WEIGHTS["VOLUME_STR"]
-        + s6 / 10 * SCORING_WEIGHTS["ADX"]
-        + s7 / 10 * SCORING_WEIGHTS["BOLL"]
-        + s8 / 10 * SCORING_WEIGHTS["ROE"]
-        + s9 / 10 * SCORING_WEIGHTS["PROFIT_GROWTH"]
-        + s10 / 10 * SCORING_WEIGHTS["PEG"]
-        + s11 / 10 * SCORING_WEIGHTS["GROSS_MARGIN"]
-        + s12 / 10 * SCORING_WEIGHTS["ROIC"]
-        + s13 / 10 * SCORING_WEIGHTS["FCF"]
-        + s14 / 10 * SCORING_WEIGHTS["INDUSTRY_RANK"]
-        + s15 / 10 * SCORING_WEIGHTS["PE_PERCENTILE"]
-        + s16 / 10 * SCORING_WEIGHTS["TURNOVER"]
-        + s17 / 10 * SCORING_WEIGHTS["NORTH_MONEY"]
-        + s18 / 10 * SCORING_WEIGHTS["MARGIN_TRADE"]
-        + s19 / 10 * SCORING_WEIGHTS["MAIN_MONEY"]
+        s1 / 10 * W["PE_HISTORY"]
+        + s2 / 10 * W["PB"]
+        + s3 / 10 * W["PEG"]
+        + s4 / 10 * W["DIVIDEND"]
+        + s5 / 10 * W["FCF_YIELD"]
+        + s6 / 10 * W["ROE"]
+        + s7 / 10 * W["ROIC"]
+        + s8 / 10 * W["GROSS_MARGIN_STABILITY"]
+        + s9 / 10 * W["FCF_NP_RATIO"]
+        + s10 / 10 * W["DEBT_RATIO"]
+        + s11 / 10 * W["OP_CASHFLOW"]
+        + s12 / 10 * W["DEDUCTED_NP_3Y_CAGR"]
+        + s13 / 10 * W["REVENUE_GROWTH"]
+        + s14 / 10 * W["RD_RATIO"]
+        + s15 / 10 * W["INDUSTRY_CEILING"]
     )
 
-    # 构建报告格式
+    # ── 构建报告 (按三大维度组织) ─────────────────────────
     dim_map = {
-        "1.1 均线": ("技术面", s1, res1, ev1),
-        "1.2 VWAP": ("", s2, res2, ev2),
-        "1.3 VCP": ("", s3, res3, ev3),
-        "1.4 RPS": ("", s4, res4, ev4),
-        "1.5 成交量": ("", s5, res5, ev5),
-        "1.6 ADX": ("", s6, res6, ev6),
-        "1.7 布林带": ("", s7, res7, ev7),
-        "2.1 ROE": ("基本面", s8, res8, ev8),
-        "2.2 净利速": ("", s9, res9, ev9),
-        "2.3 PEG": ("", s10, res10, ev10),
-        "2.4 毛利趋势": ("", s11, res11, ev11),
-        "2.5 ROIC": ("", s12, res12, ev12),
-        "2.6 现金流": ("", s13, res13, ev13),
-        "2.7 行业位": ("", s14, res14, ev14),
-        "2.8 PE分位": ("", s15, res15, ev15),
-        "3.1 换手率": ("资金面", s16, res16, ev16),
-        "3.2 北向流": ("", s17, res17, ev17),
-        "3.3 融券变": ("", s18, res18, ev18),
-        "3.4 主力流": ("", s19, res19, ev19),
+        "1.1 PE历史分位": ("估值维度", s1, res1, ev1),
+        "1.2 PB市净率": ("", s2, res2, ev2),
+        "1.3 PEG性价比": ("", s3, res3, ev3),
+        "1.4 股息率": ("", s4, res4, ev4),
+        "1.5 FCF收益率": ("", s5, res5, ev5),
+        "2.1 ROE水平": ("质量维度", s6, res6, ev6),
+        "2.2 ROIC回报": ("", s7, res7, ev7),
+        "2.3 毛利率": ("", s8, res8, ev8),
+        "2.4 FCF/净利比": ("", s9, res9, ev9),
+        "2.5 财务健康": ("", s10, res10, ev10),
+        "2.6 经营现金流": ("", s11, res11, ev11),
+        "3.1 净利增速": ("成长维度", s12, res12, ev12),
+        "3.2 营收增速": ("", s13, res13, ev13),
+        "3.3 研发/创新": ("", s14, res14, ev14),
+        "3.4 行业天花板": ("", s15, res15, ev15),
     }
 
     report = []
@@ -368,6 +431,10 @@ def calculate_score(code: str, stock_info: dict, yf_data: dict | None) -> dict |
 def score_and_rank_stocks(
     passed_symbols: list, stock_infos: dict, passed_data: dict = None
 ) -> list:
+    """
+    对通过初筛的股票进行评分并排序。
+    接口签名与旧版完全一致，保持向后兼容。
+    """
     if passed_data is None:
         passed_data = {}
     results = []

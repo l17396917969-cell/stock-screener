@@ -351,6 +351,7 @@ def _build_bs_stock_payload(
     amount_today = _safe_float(latest_row.get("Amount"), 0.0) or 0.0
     turnover_rate = _safe_float(latest_row.get("TurnoverRate"), 0.0)
     pe_ttm = _safe_float(latest_row.get("PETTM"), None)
+    pb = _safe_float(latest_row.get("PBMRQ"), None)
 
     vol_5d_avg = hist["Volume"].iloc[-6:-1].mean() if len(hist) > 5 else vol_today
     volume_ratio = vol_today / vol_5d_avg if vol_5d_avg and vol_5d_avg > 0 else 1.0
@@ -405,6 +406,8 @@ def _build_bs_stock_payload(
         else 0,
         "market_cap": market_cap,
         "pe_ttm": pe_ttm,
+        "pb": pb,
+        "dividend_yield": None,
         "turnover_rate": turnover_rate,
         "volume_ratio": volume_ratio,
         "roe": roe,
@@ -414,6 +417,7 @@ def _build_bs_stock_payload(
         "gross_margin": gross_margin,
         "fcf": fcf,
         "operating_cashflow": operating_cashflow,
+        "net_profit": net_profit,
         "ma": {"ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60},
         "vwap": vwap_approx,
         "adx": calculate_adx(hist),
@@ -547,6 +551,8 @@ def _get_stock_data_yf_fallback(code: str, index_hist=None) -> dict | None:
             else 0,
             "market_cap": info.get("marketCap"),
             "pe_ttm": info.get("trailingPE"),
+            "pb": info.get("priceToBook"),
+            "dividend_yield": info.get("dividendYield"),
             "turnover_rate": info.get("floatShares")
             and (vol_today / info.get("floatShares") * 100),
             "volume_ratio": volume_ratio,
@@ -557,6 +563,7 @@ def _get_stock_data_yf_fallback(code: str, index_hist=None) -> dict | None:
             "gross_margin": info.get("grossMargins"),
             "fcf": info.get("freeCashflow"),
             "operating_cashflow": info.get("operatingCashflow"),
+            "net_profit": info.get("netIncomeToCommon"),
             "ma": {"ma5": ma5, "ma10": ma10, "ma20": ma20, "ma60": ma60},
             "vwap": vwap_approx,
             "adx": calculate_adx(hist),
