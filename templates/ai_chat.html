@@ -249,6 +249,15 @@
   }
   .step-item .step-title { font-weight: 600; }
   .step-item .step-detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* Markdown content */
+  .md-content { font-size: 13px; line-height: 1.8; }
+  .md-content h1,.md-content h2,.md-content h3,.md-content h4 { color: var(--text); margin: 10px 0 6px; }
+  .md-content h1 { font-size: 20px; } .md-content h2 { font-size: 17px; } .md-content h3 { font-size: 15px; } .md-content h4 { font-size: 13px; }
+  .md-content table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 11px; }
+  .md-content td { padding: 5px 6px; border: 1px solid var(--border); text-align: center; }
+  .md-content b { color: var(--accent); }
+  .md-content p { margin: 0 0 6px; }
 </style>
 </head>
 <body>
@@ -257,6 +266,7 @@
   <div class="logo">📊</div>
   <h1>Stock Screener AI</h1>
   <div class="status"><span class="dot off" id="statusDot"></span><span id="statusText">就绪</span></div>
+  <a href="/logout" style="color:var(--muted);font-size:12px;text-decoration:none;margin-left:8px">⏻</a>
 </header>
 
 <div id="chat">
@@ -287,10 +297,39 @@ let eventSource = null;
 function addMsg(text, type = 'ai') {
   const el = document.createElement('div');
   el.className = `msg ${type}`;
-  el.textContent = text;
+  if (type === 'ai') {
+    el.innerHTML = text;  // AI 消息支持 HTML（Markdown 渲染后）
+  } else {
+    el.textContent = text;
+  }
   document.getElementById('chat').appendChild(el);
   scrollDown();
   return el;
+}
+
+// 简易 Markdown → HTML
+function md2html(md) {
+  if (!md) return '';
+  let h = md
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    // 标题
+    .replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    // 粗体 / 斜体
+    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
+    .replace(/\*(.+?)\*/g, '<i>$1</i>')
+    // 表格
+    .replace(/^\|(.+)\|$/gm, (line) => {
+      if (line.includes('---')) return '';
+      const cells = line.split('|').filter(c => c.trim()).map(c => '<td>' + c.trim() + '</td>');
+      return '<tr>' + cells.join('') + '</tr>';
+    })
+    // 换行
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+  return '<div class="md-content"><p>' + h + '</p></div>';
 }
 
 function scrollDown() {
@@ -384,6 +423,12 @@ function sendMessage() {
   setStatus(true);
   clearTimeline();
 
+  // ⚡ 立即展示 4 步进度条（全部 active）
+  addTimelineStep('macro', 'Step 1', '宏观分析', '调用 DeepSeek…', 'active');
+  addTimelineStep('fetch', 'Step 2', '成分股提取', '等待中', 'active');
+  addTimelineStep('score', 'Step 3', '量化评分', '等待中', 'active');
+  addTimelineStep('rank', 'Step 4', '精选排序', '等待中', 'active');
+
   // 断开旧连接
   if (eventSource) eventSource.close();
 
@@ -398,7 +443,7 @@ function sendMessage() {
       addTimelineStep('macro', 'Step 1', '宏观分析',
         (d.sectors||[]).join(' • ') + ' (' + (d.sectors||[]).length + ' 个板块)', 'done');
       if (d.macro_reasoning) {
-        addMsg('🤖 ' + d.macro_reasoning.slice(0, 500) + (d.macro_reasoning.length > 500 ? '…' : ''), 'ai');
+        addMsg(md2html(d.macro_reasoning), 'ai');
       }
     }
 
@@ -446,7 +491,6 @@ function sendMessage() {
 
   // ── 连接错误 ──
   eventSource.onerror = () => {
-    // EventSource 在某些浏览器会自动重连，手动关掉
     if (eventSource.readyState === EventSource.CLOSED) {
       setStatus(false);
     }
