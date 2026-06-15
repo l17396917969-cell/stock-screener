@@ -6,6 +6,50 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# ── 统一 API Key 加载 ───────────────────────────────
+# 多源回退: SCRENNER_CONFIG → 环境变量 → .env 文件
+_ds_key_cache = None
+
+def get_ds_key() -> str:
+    """多源加载 DeepSeek API Key, 带缓存。"""
+    global _ds_key_cache
+    if _ds_key_cache:
+        return _ds_key_cache
+
+    # 1) SCRENNER_CONFIG (SSE 路由会注入)
+    try:
+        from config import SCRENNER_CONFIG
+        k = SCRENNER_CONFIG.get("DS_API_KEY", "")
+        if k:
+            _ds_key_cache = k
+            return k
+    except Exception:
+        pass
+
+    # 2) 环境变量
+    k = os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("DS_API_KEY", "")
+    if k:
+        _ds_key_cache = k
+        return k
+
+    # 3) .env 文件 (多个可能路径)
+    try:
+        from dotenv import load_dotenv
+        for env_path in [
+            os.path.join(os.environ.get("STOCK_SHARED_DIR", "/opt/stock-screener-shared"), ".env"),
+            ".env",
+        ]:
+            if os.path.exists(env_path):
+                load_dotenv(env_path, override=True)
+        k = os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("DS_API_KEY", "")
+        if k:
+            _ds_key_cache = k
+            return k
+    except Exception:
+        pass
+
+    return ""
+
 # DeepSeek 提示词模板
 PROMPT_TEMPLATE = """### A股多专家联合诊断系统 (CIO 决策模式)
 

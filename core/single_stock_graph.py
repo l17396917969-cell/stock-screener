@@ -67,11 +67,9 @@ def _llm_resolve_stock(query: str, raw_input: str = "") -> tuple[str, str] | Non
     示例输出: ("002475", "立讯精密")
     """
     try:
-        from .deepseek_analyzer import _call_deepseek
-        from config import SCRENNER_CONFIG
-        import os
+        from .deepseek_analyzer import _call_deepseek, get_ds_key
 
-        ds_key = SCRENNER_CONFIG.get("DS_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
+        ds_key = get_ds_key()
         if not ds_key:
             logger.warning("LLM resolve: no DeepSeek API key")
             return None
@@ -190,11 +188,9 @@ def node_industry_context(state: SingleStockState) -> dict:
 def _llm_industry_context(code: str, name: str, csic: str, concepts: list[str], peers: list[dict]) -> str:
     """LLM 补全产业链上下文: 上下游、主要竞争对手、行业动态。"""
     try:
-        from .deepseek_analyzer import _call_deepseek
-        from config import SCRENNER_CONFIG
-        import os
+        from .deepseek_analyzer import _call_deepseek, get_ds_key
 
-        ds_key = SCRENNER_CONFIG.get("DS_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
+        ds_key = get_ds_key()
         if not ds_key:
             return ""
 
@@ -335,7 +331,7 @@ def node_growth(state: SingleStockState) -> dict:
 def node_ai_thesis(state: SingleStockState) -> dict:
     """DeepSeek 综合研判 + 评分汇总。"""
     try:
-        from .deepseek_analyzer import _call_deepseek
+        from .deepseek_analyzer import _call_deepseek, get_ds_key
         from config import SCRENNER_CONFIG
 
         pe_val = _score_pe(state.get("pe", 0))
@@ -346,7 +342,7 @@ def node_ai_thesis(state: SingleStockState) -> dict:
         rec = "强烈推荐" if total >= 80 else "推荐" if total >= 60 else "中性" if total >= 40 else "回避"
 
         prompt = _build_thesis_prompt(state)
-        ds_key = SCRENNER_CONFIG.get("DS_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
+        ds_key = get_ds_key()
         ds_model = SCRENNER_CONFIG.get("DS_MODEL", "deepseek-chat")
 
         ai_text = ""
