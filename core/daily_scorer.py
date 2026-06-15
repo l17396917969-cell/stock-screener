@@ -57,12 +57,10 @@ def collect_stocks(board_data, sectors, name_map, existing_codes):
     logger.info(f"Collected {len(stocks)} unique stocks")
     return stocks
 
-def score_one_stock(code, name, sector):
+def score_one_stock(code, name, sector, index_hist=None):
     try:
         from core.stock_screener import deep_screen_stock
         from core.scorer import calculate_score
-        from core.data_fetcher import get_index_data
-        index_hist = get_index_data()
         passed, reason, yf_data = deep_screen_stock(code, index_hist=index_hist)
         if yf_data is None:
             return {"code":code,"name":name,"sector":sector,"passed":False,"reason":reason or "数据获取失败","score":0,"scored_at":time.strftime("%Y-%m-%d %H:%M:%S")}
@@ -88,12 +86,15 @@ def main(limit=50, force=False):
     candidates = collect_stocks(board_data, DEFAULT_SECTORS, name_map, set() if force else existing)
     if not candidates: return logger.info("All scored -- nothing to do")
     to_score = candidates[:limit]
+    # 缓存指数数据，整个批次复用
+    from core.data_fetcher import get_index_data
+    index_hist = get_index_data()
     scored = 0
     for i, (code, name, sector) in enumerate(to_score):
-        r = score_one_stock(code, name, sector)
+        r = score_one_stock(code, name, sector, index_hist=index_hist)
         if r: upsert_score(r); scored += 1
         if scored % 10 == 0: logger.info(f"Progress: {scored}/{len(to_score)}")
-        time.sleep(15)
+        time.sleep(2)  # Baostock 不需要长间隔，2s 足够
     logger.info(f"=== Done: {scored} new in {time.time()-t0:.0f}s, db total={db_count()} ===")
 
 if __name__ == "__main__":
