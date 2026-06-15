@@ -92,7 +92,10 @@ def _emit_log(user_id, message, status="info"):
 
 def execute_step1_macro(user_id, api_key=None, ds_key=None):
     try:
-        state_mgr.update_state(user_id, {"is_analyzing": True, "error": None})
+        state_mgr.update_state(user_id, {
+            "is_analyzing": True, "error": None,
+            "logs": [], "ai_sectors": None, "step": 0, "scoring_results": None
+        })
 
         _emit_log(
             user_id,
@@ -316,7 +319,7 @@ def execute_step3_batch(user_id):
 @app.route("/")
 @login_required
 def index():
-    return render_template("index.html")
+    return redirect("/ai")
 
 
 @app.route("/ai")

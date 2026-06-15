@@ -363,7 +363,70 @@ async function sendMessage() {
     
     // Poll for status
     await pollAnalysis();
+
+    } catch (e) {
+    addSystemLog(`[FAIL] ${e.message}`, 'fail');
+    setStatus(false);
+    }
+    }
+
+    async function pollAnalysis() {
+    let attempts = 0;
+    let doneStep1 = false;
     
+    pollingId = setInterval(async () => {
+    if (doneStep1) return; // already moved to step 2
+    attempts++;
+    try {
+      const resp = await fetch('/api/status');
+      const data = await resp.json();
+        
+      if (!data.success) return;
+        
+      // Process new logs
+      if (data.logs) {
+        const known = new Set();
+        document.querySelectorAll('.msg.system').forEach(el => known.add(el.textContent));
+        for (const log of data.logs) {
+          const text = log.text || log;
+          if (!known.has(text)) addSystemLog(text, text.includes('[PASS]') ? 'pass' : text.includes('[FAIL]') ? 'fail' : '');
+        }
+      }
+
+      if (data.error) {
+        clearInterval(pollingId);
+        addSystemLog(`[FAIL] ${data.error}`, 'fail');
+        setStatus(false);
+        return;
+      }
+        
+      // Check completion: is_analyzing must be false AND we have results
+      if (!data.is_analyzing && data.ai_sectors && data.ai_sectors.length > 0) {
+        doneStep1 = true;
+        clearInterval(pollingId);
+          
+        addSystemLog(`[PASS] AI 已识别 ${data.ai_sectors.length} 个板块`, 'pass');
+        if (data.ai_reasoning) addSummary({ reasoning: data.ai_reasoning });
+          
+        await fetchStep2(data.ai_sectors);
+        return;
+      }
+
+      if (!data.is_analyzing && data.error) {
+        clearInterval(pollingId);
+        addSystemLog(`[FAIL] ${data.error}`, 'fail');
+        setStatus(false);
+        return;
+      }
+
+      if (attempts >= 180) {
+        clearInterval(pollingId);
+        addSystemLog('[FAIL] 分析超时，请重试', 'fail');
+        setStatus(false);
+      }
+    } catch (e) {}
+    }, 2000);
+    }
   } catch (e) {
     addSystemLog(`[FAIL] ${e.message}`, 'fail');
     setStatus(false);
