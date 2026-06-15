@@ -1169,7 +1169,7 @@ def web_search_stock(code: str, name: str, max_results: int = 5) -> list[dict]:
         [{"title": "...", "url": "...", "snippet": "..."}, ...]
     """
     try:
-        from duckduckgo_search import DDGS
+        from ddgs import DDGS
         query = f"{name} {code} 股票 最新消息"
         results = []
         with DDGS() as ddgs:
