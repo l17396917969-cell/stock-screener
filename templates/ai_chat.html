@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Stock Screener AI</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #14141f;
+    --card: #1a1a2e;
+    --primary: #6366f1;
+    --accent: #22c55e;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --border: #1e293b;
+    --danger: #ef4444;
+    --warn: #f59e0b;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, 'SF Pro Text', 'PingFang SC', sans-serif;
+    height: 100dvh;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  header {
+    padding: 12px 16px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+  header .logo {
+    width: 32px; height: 32px;
+    background: linear-gradient(135deg, var(--primary), #a855f7);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+  }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header .status { margin-left: auto; font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+  .dot.off { background: var(--muted); }
+  .dot.busy { background: var(--warn); animation: pulse 1s infinite; }
+  @keyframes pulse { 0%,100%{opacity:0.3} 50%{opacity:1} }
+
+  #chat {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .msg {
+    max-width: 90%;
+    padding: 12px 16px;
+    border-radius: 16px;
+    font-size: 14px;
+    line-height: 1.6;
+    animation: fadeIn 0.3s ease;
+  }
+  @keyframes fadeIn { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--primary);
+    color: white;
+    border-bottom-right-radius: 4px;
+  }
+  .msg.ai {
+    align-self: flex-start;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-bottom-left-radius: 4px;
+  }
+  .msg.system {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px dashed var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    padding: 8px 12px;
+    border-radius: 8px;
+    max-width: 100%;
+    font-family: 'SF Mono', monospace;
+  }
+  .msg.system.pass { border-color: var(--accent); color: var(--accent); }
+  .msg.system.fail { border-color: var(--danger); color: var(--danger); }
+
+  /* Stock Cards */
+  .card-row {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    align-self: stretch;
+    scroll-snap-type: x mandatory;
+  }
+  .stock-card {
+    min-width: 180px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px;
+    flex-shrink: 0;
+    scroll-snap-align: start;
+    transition: border-color 0.2s;
+  }
+  .stock-card:hover { border-color: var(--primary); }
+  .stock-card .code { font-size: 12px; color: var(--muted); }
+  .stock-card .name { font-size: 16px; font-weight: 700; margin: 2px 0 8px; }
+  .stock-card .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; }
+  .metric-val { font-weight: 600; }
+  .metric-val.up { color: var(--accent); }
+  .metric-val.down { color: var(--danger); }
+  .metric-label { color: var(--muted); font-size: 10px; }
+  .stock-card .score {
+    margin-top: 10px; text-align: center;
+    font-size: 22px; font-weight: 800;
+    background: linear-gradient(135deg, var(--primary), var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  .stock-card .ai-note {
+    margin-top: 8px; font-size: 11px; color: var(--muted);
+    border-top: 1px solid var(--border); padding-top: 8px;
+  }
+
+  /* Summaries */
+  .summary {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 14px;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .summary h3 { font-size: 14px; margin-bottom: 6px; color: var(--primary); }
+  .summary table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12px; }
+  .summary th, .summary td { padding: 6px 8px; border: 1px solid var(--border); text-align: center; }
+  .summary th { background: var(--surface); }
+
+  /* Skeleton */
+  .skeleton { background: linear-gradient(90deg, var(--card) 25%, var(--surface) 50%, var(--card) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; border-radius: 10px; height: 60px; }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+  /* Input */
+  footer {
+    padding: 12px 16px 24px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .input-row {
+    display: flex;
+    gap: 8px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    padding: 4px 4px 4px 16px;
+    align-items: center;
+  }
+  .input-row input {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 14px;
+    outline: none;
+    padding: 8px 0;
+  }
+  .input-row input::placeholder { color: var(--muted); }
+  .input-row button {
+    background: var(--primary);
+    color: white;
+    border: none;
+    border-radius: 20px;
+    width: 36px; height: 36px;
+    font-size: 18px;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: opacity 0.2s;
+    flex-shrink: 0;
+  }
+  .input-row button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .quick-actions {
+    display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+  }
+  .quick-btn {
+    background: var(--card);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    padding: 5px 12px;
+    border-radius: 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .quick-btn:hover { border-color: var(--primary); color: var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">📊</div>
+  <h1>Stock Screener AI</h1>
+  <div class="status"><span class="dot off" id="statusDot"></span><span id="statusText">就绪</span></div>
+</header>
+
+<div id="chat">
+  <div class="msg ai">
+    你好！我是 AI 选股助手。告诉我你想找什么样的股票，比如：<br>
+    • 「帮我找被低估的潜力股」<br>
+    • 「今天市场有哪些价值洼地」<br>
+    • 「筛选 ROE>15% 的科技股」
+  </div>
+</div>
+
+<footer>
+  <div class="input-row">
+    <input type="text" id="userInput" placeholder="告诉我想找什么样的股票..." autofocus>
+    <button id="sendBtn" onclick="sendMessage()">↑</button>
+  </div>
+  <div class="quick-actions">
+    <span class="quick-btn" onclick="quickAction('帮我找被低估的A股价值洼地')">💎 价值洼地</span>
+    <span class="quick-btn" onclick="quickAction('分析当前热门板块的潜力股')">🔥 热门板块</span>
+    <span class="quick-btn" onclick="quickAction('筛选高ROE低PE的科技股')">📈 高ROE科技</span>
+  </div>
+</footer>
+
+<script>
+let pollingId = null;
+let currentSectors = [];
+
+function addMsg(text, type = 'ai') {
+  const el = document.createElement('div');
+  el.className = `msg ${type}`;
+  el.textContent = text;
+  document.getElementById('chat').appendChild(el);
+  scrollDown();
+  return el;
+}
+
+function scrollDown() {
+  const chat = document.getElementById('chat');
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function setStatus(busy) {
+  const dot = document.getElementById('statusDot');
+  const txt = document.getElementById('statusText');
+  if (busy) {
+    dot.className = 'dot busy';
+    txt.textContent = '分析中…';
+    document.getElementById('sendBtn').disabled = true;
+    document.getElementById('userInput').disabled = true;
+  } else {
+    dot.className = 'dot';
+    txt.textContent = '就绪';
+    document.getElementById('sendBtn').disabled = false;
+    document.getElementById('userInput').disabled = false;
+  }
+}
+
+function addSystemLog(text, cls = '') {
+  const el = addMsg(text, 'system');
+  if (cls) el.classList.add(cls);
+  return el;
+}
+
+function addCards(stocks) {
+  if (!stocks || stocks.length === 0) return;
+  
+  const container = document.createElement('div');
+  container.className = 'card-row';
+  
+  stocks.forEach(s => {
+    const card = document.createElement('div');
+    card.className = 'stock-card';
+    card.innerHTML = `
+      <div class="code">${s.code || '000000'}</div>
+      <div class="name">${s.name || s.symbol || '—'}</div>
+      <div class="metrics">
+        <div><div class="metric-val ${(s.pe||0)>0?'':'down'}">${(s.pe||0).toFixed(1)}</div><div class="metric-label">PE</div></div>
+        <div><div class="metric-val up">${(s.roe||0).toFixed(1)}%</div><div class="metric-label">ROE</div></div>
+        <div><div class="metric-val">${(s.mcap||0)>100? (s.mcap/10000).toFixed(1)+'亿' : s.mcap||'—'}</div><div class="metric-label">市值</div></div>
+        <div><div class="metric-val ${(s.change_pct||0)>=0?'up':'down'}">${(s.change_pct||0)>=0?'+':''}${(s.change_pct||0).toFixed(2)}%</div><div class="metric-label">涨跌</div></div>
+      </div>
+      ${s.score ? `<div class="score">${s.score}</div>` : ''}
+      ${s.ai_summary ? `<div class="ai-note">🤖 ${s.ai_summary}</div>` : ''}
+    `;
+    container.appendChild(card);
+  });
+  
+  document.getElementById('chat').appendChild(container);
+  scrollDown();
+}
+
+function addSummary(analysis) {
+  if (!analysis) return;
+  const el = addMsg('', 'ai');
+  
+  let html = '<div class="summary">';
+  
+  // Reasoning
+  if (analysis.reasoning) {
+    html += `<h3>🤖 AI 分析</h3><p style="font-size:12px;color:var(--muted);margin-bottom:10px">${analysis.reasoning.replace(/\n/g,'<br>')}</p>`;
+  }
+  
+  // Sectors table
+  if (analysis.sectors && analysis.sectors.length) {
+    html += '<h3>📋 推荐板块</h3>';
+  }
+  
+  el.innerHTML = html;
+}
+
+async function quickAction(text) {
+  document.getElementById('userInput').value = text;
+  await sendMessage();
+}
+
+async function sendMessage() {
+  const input = document.getElementById('userInput');
+  const text = input.value.trim();
+  if (!text) return;
+  
+  addMsg(text, 'user');
+  input.value = '';
+  
+  // Start macro analysis
+  setStatus(true);
+  addSystemLog('[SYS] 正在调用 DeepSeek 进行宏观分析…');
+  
+  try {
+    const step1Resp = await fetch('/api/step1_macro', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({})
+    });
+    
+    if (!step1Resp.ok) {
+      // Might redirect to login
+      if (step1Resp.status === 302 || step1Resp.redirected) {
+        window.location.href = '/login';
+        return;
+      }
+      throw new Error(`HTTP ${step1Resp.status}`);
+    }
+    
+    const step1Data = await step1Resp.json();
+    if (!step1Data.success) {
+      addSystemLog(`[FAIL] 启动分析失败: ${step1Data.message || '未知错误'}`, 'fail');
+      setStatus(false);
+      return;
+    }
+    
+    // Poll for status
+    await pollAnalysis();
+    
+  } catch (e) {
+    addSystemLog(`[FAIL] ${e.message}`, 'fail');
+    setStatus(false);
+  }
+}
+
+async function pollAnalysis() {
+  // Use the SSE-like polling on /api/status
+  let attempts = 0;
+  const maxAttempts = 180; // 3 minutes max
+  
+  pollingId = setInterval(async () => {
+    attempts++;
+    try {
+      const resp = await fetch('/api/status');
+      const data = await resp.json();
+      
+      if (!data.success) return;
+      
+      // Process logs
+      if (data.logs && data.logs.length) {
+        const known = new Set();
+        document.querySelectorAll('.msg.system').forEach(el => known.add(el.textContent));
+        data.logs.forEach(log => {
+          const text = log.text || log;
+          if (!known.has(text)) {
+            const cls = text.includes('[PASS]') ? 'pass' : text.includes('[FAIL]') ? 'fail' : '';
+            addSystemLog(text, cls);
+          }
+        });
+      }
+      
+      // Check if analysis complete or errored
+      if (data.state && data.state.error) {
+        clearInterval(pollingId);
+        addSystemLog(`[FAIL] 分析出错: ${data.state.error}`, 'fail');
+        setStatus(false);
+        return;
+      }
+      
+      if (data.state && data.state.ai_sectors && data.state.ai_sectors.length) {
+        currentSectors = data.state.ai_sectors;
+        clearInterval(pollingId);
+        
+        // Show sectors
+        addSystemLog(`[PASS] AI 已识别 ${currentSectors.length} 个板块: ${currentSectors.join(', ')}`, 'pass');
+        
+        if (data.state.ai_reasoning) {
+          addSummary({ reasoning: data.state.ai_reasoning });
+        }
+        
+        // Start Step 2
+        await fetchStep2(currentSectors);
+        return;
+      }
+      
+      if (attempts >= maxAttempts) {
+        clearInterval(pollingId);
+        addSystemLog('[FAIL] 分析超时，请重试', 'fail');
+        setStatus(false);
+      }
+    } catch (e) {
+      // Silent retry
+    }
+  }, 2000);
+}
+
+async function fetchStep2(sectors) {
+  addSystemLog(`📋 正在提取 [${sectors.join(', ')}] 的成分股…`);
+  
+  try {
+    const resp = await fetch('/api/step2_fetch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sectors })
+    });
+    const data = await resp.json();
+    
+    if (!data.success) {
+      addSystemLog(`[FAIL] 成分股提取失败: ${data.message || '未知错误'}`, 'fail');
+      setStatus(false);
+      return;
+    }
+    
+    // Poll Step 2 status
+    await pollStep2();
+    
+  } catch (e) {
+    addSystemLog(`[FAIL] ${e.message}`, 'fail');
+    setStatus(false);
+  }
+}
+
+async function pollStep2() {
+  let attempts = 0;
+  
+  const intv = setInterval(async () => {
+    attempts++;
+    try {
+      const resp = await fetch('/api/status');
+      const data = await resp.json();
+      
+      if (!data.success) return;
+      
+      // Process logs
+      if (data.logs && data.logs.length) {
+        const known = new Set();
+        document.querySelectorAll('.msg.system').forEach(el => known.add(el.textContent));
+        data.logs.forEach(log => {
+          const text = log.text || log;
+          if (!known.has(text)) {
+            const cls = text.includes('[PASS]') ? 'pass' : text.includes('[FAIL]') ? 'fail' : '';
+            addSystemLog(text, cls);
+          }
+        });
+      }
+      
+      if (data.state && data.state.error) {
+        clearInterval(intv);
+        addSystemLog(`[FAIL] ${data.state.error}`, 'fail');
+        setStatus(false);
+        return;
+      }
+      
+      // Check for scoring results
+      if (data.state && data.state.scoring_results) {
+        clearInterval(intv);
+        const results = data.state.scoring_results;
+        addSystemLog(`[PASS] 筛选完成！找到 ${results.top_stocks ? results.top_stocks.length : results.length || 0} 支潜力股`, 'pass');
+        
+        // Show as cards
+        const stocks = results.top_stocks || results || [];
+        if (stocks.length) addCards(stocks);
+        
+        setStatus(false);
+        return;
+      }
+      
+      if (attempts >= 120) {
+        clearInterval(intv);
+        addSystemLog('[FAIL] 分析超时', 'fail');
+        setStatus(false);
+      }
+    } catch (e) {}
+  }, 2000);
+}
+
+// Enter key
+document.getElementById('userInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+});
+</script>
+</body>
+</html>

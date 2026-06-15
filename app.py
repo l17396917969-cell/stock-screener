@@ -319,6 +319,22 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/ai")
+@login_required
+def ai_chat():
+    return render_template("ai_chat.html")
+
+
+@app.route("/api/status", methods=["GET"])
+@login_required
+def api_status():
+    """Returns current analysis state + logs for the chat UI."""
+    state = state_mgr.get_state(current_user.id)
+    resp = dict(state)
+    resp["success"] = True
+    return jsonify(resp)
+
+
 @app.route("/api/state", methods=["GET"])
 @login_required
 def get_state():
