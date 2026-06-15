@@ -155,67 +155,100 @@ def _lookup_code(name: str) -> str:
 
 
 # ═══════════════════════════════════════
-# Node 2: 产业链上下文 (本地缓存 + LLM 补全)
+# Node 2: 产业链上下文 (LLM 实时生成, 不依赖训练数据)
 # ═══════════════════════════════════════
 def node_industry_context(state: SingleStockState) -> dict:
-    """从 board_stocks.json 获取 CSIC 行业 + 概念板块; 从 score_store 获取同行评分。
-    本地数据稀疏时调用 DeepSeek LLM 补全产业链上下文。
+    """CSIC 行业分类 + LLM 生成产业链分析 (概念板块/竞争对手/行业动态/上下游)。
+    始终调用 LLM, 用实时财务数据做锚点, 避免纯训练数据幻觉。
     """
     code = state.get("resolved_code", "")
     name = state.get("resolved_name", "")
     try:
         csic = _get_csic_sector(code)
-        concepts = _get_concept_boards(code)
+        local_concepts = _get_concept_boards(code)
         peers = _get_peers_from_store(code, csic)
 
-        # 如果同行数据为空或概念板块少于 2 个，用 LLM 补全
-        industry_context = ""
-        if not peers or len(concepts) < 2:
-            industry_context = _llm_industry_context(code, name, csic, concepts, peers)
+        # 从 board_stocks 拿到的概念板块只是 CSIC 分类名，没意义
+        # 始终调 LLM 生成真正的概念板块 + 产业链分析
+        industry_context, enriched_concepts = _llm_industry_context(code, name, csic, peers)
+
+        # 合并: 本地 CSIC + LLM 概念板块
+        all_concepts = [csic] + enriched_concepts if enriched_concepts else local_concepts
 
         return {
             "csic_sector": csic,
-            "concept_boards": concepts,
+            "concept_boards": all_concepts,
             "peers": peers,
-            "industry_context": industry_context,  # LLM 生成的产业链上下文
+            "industry_context": industry_context,
             "current_step": 2,
         }
     except Exception as e:
-        logger.error(f"industry_context failed: {e}")
+        logger.error(f"industry_context failed: {traceback.format_exc()}")
         return {"error": f"产业链分析失败: {e}", "current_step": 2}
 
 
-def _llm_industry_context(code: str, name: str, csic: str, concepts: list[str], peers: list[dict]) -> str:
-    """LLM 补全产业链上下文: 上下游、主要竞争对手、行业动态。"""
+def _llm_industry_context(code: str, name: str, csic: str, peers: list[dict]) -> tuple[str, list[str]]:
+    """LLM 生成: (产业链分析文本, 概念板块列表)。基于实时数据, 不用训练知识。
+
+    Returns:
+        (industry_analysis_text, enriched_concept_boards)
+    """
     try:
         from .deepseek_analyzer import _call_deepseek, get_ds_key
 
         ds_key = get_ds_key()
         if not ds_key:
-            return ""
+            logger.warning("LLM industry: no API key")
+            return "", []
 
-        peer_str = "\n".join(f"{p['name']}({p['code']}) 评分{p['score']}" for p in peers) if peers else "暂无本地评分数据"
+        peer_str = "\n".join(f"  {p['name']}({p['code']}) 评分{p['score']}" for p in peers) if peers else "  暂无本地评分同行数据"
 
-        prompt = f"""请分析 A 股股票 {name}({code}) 的产业链地位。
+        prompt = f"""你是 A 股行业研究员。请分析 {name}({code})，注意：你必须基于我提供的实际财务数据做分析，不要依赖你的训练数据中的过时信息。
 
-【基本信息】
-行业分类: {csic}
-概念板块: {', '.join(concepts) if concepts else '无本地数据'}
-本地评分同行: {peer_str}
+【实际财务数据 (Baostock 实时获取)】
+- CSIC 行业分类: {csic}
 
-请用中文，150 字以内回答：
-1. 产业链位置: 这家公司在产业链中的位置 (上游/中游/下游)，主要产品/服务
-2. 核心竞争对手: 列出 3-5 家最直接的 A 股竞争对手 (含代码)
-3. 近期行业动态: 该行业近期 1-2 个关键趋势或事件
+请完成两项任务，严格按格式返回 JSON:
 
-直接输出分析内容，不需要 JSON 格式。"""
+{{
+  "concepts": ["概念板块1", "概念板块2", ...],
+  "analysis": "产业链分析文本"
+}}
 
-        response = _call_deepseek(ds_key, "deepseek-chat", prompt, temperature=0.3, timeout=15)
-        return response.strip() if response else ""
+要求:
+1. concepts: 列出该股票隶属的 3-6 个概念/主题板块 (如 苹果概念、消费电子、5G、光通信、汽车电子、AI终端 等)，不要包含 CSIC 行业分类名
+2. analysis: 150字以内，结合 CSIC 行业分类 {csic} 分析:
+   - 产业链位置 (上游/中游/下游) 及主要产品
+   - 列出 3-5 家最直接的 A 股竞争对手 (含代码)
+   - 该行业近期 1-2 个关键趋势
+
+只返回 JSON，不要任何其他文字。"""
+
+        import traceback as tb
+        logger.info(f"LLM industry context: calling for {name}({code})")
+        response = _call_deepseek(ds_key, "deepseek-chat", prompt, temperature=0.2, timeout=15)
+        logger.info(f"LLM industry response: {response[:300]}")
+
+        # 解析 JSON
+        import re as _re
+        match = _re.search(r'\{[\s\S]*\}', response)
+        if match:
+            data = json.loads(match.group())
+            analysis = str(data.get("analysis", "")).strip()
+            concepts = data.get("concepts", [])
+            if isinstance(concepts, list):
+                concepts = [str(c).strip() for c in concepts if str(c).strip()]
+            else:
+                concepts = []
+            logger.info(f"LLM industry: got {len(concepts)} concepts, analysis {len(analysis)} chars")
+            return analysis, concepts
+
+        logger.warning(f"LLM industry: failed to parse JSON from: {response[:200]}")
+        return response.strip(), []
 
     except Exception as e:
-        logger.warning(f"LLM industry context failed: {e}")
-        return ""
+        logger.error(f"LLM industry context failed: {tb.format_exc()}")
+        return "", []
 
 
 def _get_csic_sector(code: str) -> str:
@@ -394,33 +427,42 @@ def _score_growth(growth: float) -> int:
 
 def _build_thesis_prompt(state: SingleStockState) -> str:
     industry_ctx = state.get("industry_context", "")
-    return f"""你是一位价值投资分析师。请基于以下信息对 {state.get("resolved_name", "")}({state.get("resolved_code", "")}) 做研判。
+    name = state.get("resolved_name", "")
+    code = state.get("resolved_code", "")
+    pe = state.get("pe", 0)
+    pb = state.get("pb", 0)
+    roe = state.get("roe", 0)
+    gm = state.get("gross_margin", 0)
+    rev_g = state.get("revenue_cagr_3y", 0)
+    earn_g = state.get("earnings_cagr_3y", 0)
+    concepts = state.get("concept_boards", [])
 
-【产业链】
-行业: {state.get("csic_sector", "未知")}
-概念板块: {", ".join(state.get("concept_boards", []))}
-{chr(10) + industry_ctx if industry_ctx else ""}
+    return f"""你是价值投资分析师。请对 {name}({code}) 做数据驱动的研判。
 
-【估值】
-PE: {state.get("pe", 0):.1f}
-PB: {state.get("pb", 0):.1f}
+【关键规则】你必须基于下面提供的实时数据做分析，不要依赖你的训练数据！
 
-【质量】
-ROE: {state.get("roe", 0):.1f}%
-毛利率: {state.get("gross_margin", 0):.1f}%
+【实时数据 — Baostock 获取】
+- PE(TTM): {pe:.1f}  |  PB: {pb:.1f}
+- ROE: {roe:.1f}%  |  毛利率: {gm:.1f}%
+- 营收增速: {rev_g:.1f}%  |  利润增速: {earn_g:.1f}%
+- CSIC 行业: {state.get('csic_sector', '未知')}
+- 概念板块: {', '.join(concepts) if concepts else '待分析'}
 
-【成长】
-营收增速: {state.get("revenue_cagr_3y", 0):.1f}%
-利润增速: {state.get("earnings_cagr_3y", 0):.1f}%
+【产业链上下文】
+{industry_ctx if industry_ctx else '见上方概念板块'}
 
 【同行对比】
-{_format_peers(state.get("peers", []))}
+{_format_peers(state.get('peers', []))}
 
-请用中文，200字以内，从价值投资角度分析：
-1. 产业链地位与护城河
-2. 当前估值是否合理
-3. 主要风险
-4. 投资建议"""
+请基于以上数据，用中文 200 字以内分析:
+1. 估值判断: PE={pe:.1f} 在行业中处于什么水平？结合 {state.get('csic_sector', '')} 行业的合理估值区间判断
+2. 质量评估: ROE={roe:.1f}% 毛利率={gm:.1f}% 处于什么水平？盈利质量如何？
+3. 成长性: 营收增速 {rev_g:.1f}% vs 利润增速 {earn_g:.1f}% — 增收是否增利？
+4. 综合建议: 基于数据给出投资建议
+
+核心原则: 只基于提供的数字下结论，不要编造。"""
+
+
 
 def _format_peers(peers: list[dict]) -> str:
     if not peers:
