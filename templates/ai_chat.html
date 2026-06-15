@@ -203,6 +203,52 @@
     transition: all 0.2s;
   }
   .quick-btn:hover { border-color: var(--primary); color: var(--text); }
+
+  /* Step Timeline */
+  .step-timeline {
+    position: relative;
+    padding-left: 24px;
+    margin: 8px 0;
+    align-self: stretch;
+  }
+  .step-timeline::before {
+    content: '';
+    position: absolute;
+    left: 8px; top: 0; bottom: 0;
+    width: 2px;
+    background: var(--border);
+  }
+  .step-item {
+    position: relative;
+    padding: 10px 14px;
+    margin-bottom: 8px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px;
+    transition: all 0.3s;
+  }
+  .step-item::before {
+    content: '';
+    position: absolute;
+    left: -20px; top: 16px;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--border);
+    transition: background 0.3s;
+  }
+  .step-item.active::before { background: var(--primary); animation: pulse 1.5s infinite; }
+  .step-item.done::before { background: var(--accent); }
+  .step-item.fail::before { background: var(--danger); }
+  .step-item .step-label {
+    font-size: 10px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 2px;
+  }
+  .step-item .step-title { font-weight: 600; }
+  .step-item .step-detail { font-size: 12px; color: var(--muted); margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -235,9 +281,9 @@
 </footer>
 
 <script>
-let pollingId = null;
-let currentSectors = [];
+let eventSource = null;
 
+// ── 辅助函数 ──
 function addMsg(text, type = 'ai') {
   const el = document.createElement('div');
   el.className = `msg ${type}`;
@@ -268,250 +314,146 @@ function setStatus(busy) {
   }
 }
 
-function addSystemLog(text, cls = '') {
-  const el = addMsg(text, 'system');
-  if (cls) el.classList.add(cls);
-  return el;
-}
-
 function addCards(stocks) {
   if (!stocks || stocks.length === 0) return;
-  
   const container = document.createElement('div');
   container.className = 'card-row';
-  
   stocks.forEach(s => {
     const card = document.createElement('div');
     card.className = 'stock-card';
     card.innerHTML = `
       <div class="code">${s.code || '000000'}</div>
-      <div class="name">${s.name || s.symbol || '—'}</div>
+      <div class="name">${s.name || '—'}</div>
       <div class="metrics">
         <div><div class="metric-val ${(s.pe||0)>0?'':'down'}">${(s.pe||0).toFixed(1)}</div><div class="metric-label">PE</div></div>
         <div><div class="metric-val up">${(s.roe||0).toFixed(1)}%</div><div class="metric-label">ROE</div></div>
-        <div><div class="metric-val">${(s.mcap||0)>100? (s.mcap/10000).toFixed(1)+'亿' : s.mcap||'—'}</div><div class="metric-label">市值</div></div>
-        <div><div class="metric-val ${(s.change_pct||0)>=0?'up':'down'}">${(s.change_pct||0)>=0?'+':''}${(s.change_pct||0).toFixed(2)}%</div><div class="metric-label">涨跌</div></div>
+        <div><div class="metric-val">${(s.mcap||0)>100 ? (s.mcap/10000).toFixed(1)+'亿' : (s.mcap||'—')}</div><div class="metric-label">市值</div></div>
+        <div><div class="metric-val">—</div><div class="metric-label">评分</div></div>
       </div>
-      ${s.score ? `<div class="score">${s.score}</div>` : ''}
-      ${s.ai_summary ? `<div class="ai-note">🤖 ${s.ai_summary}</div>` : ''}
+      ${s.score ? `<div class="score">${s.score}</div>` : '<div class="score">'+(s.passed?'✅':'❌')+'</div>'}
+      ${s.reason ? `<div class="ai-note">${s.reason}</div>` : ''}
     `;
     container.appendChild(card);
   });
-  
   document.getElementById('chat').appendChild(container);
   scrollDown();
 }
 
-function addSummary(analysis) {
-  if (!analysis) return;
-  const el = addMsg('', 'ai');
-  
-  let html = '<div class="summary">';
-  
-  // Reasoning
-  if (analysis.reasoning) {
-    html += `<h3>🤖 AI 分析</h3><p style="font-size:12px;color:var(--muted);margin-bottom:10px">${analysis.reasoning.replace(/\n/g,'<br>')}</p>`;
+// ── 思维链时间线 ──
+function addTimelineStep(id, label, title, detail = '', status = 'active') {
+  let tl = document.getElementById('timeline');
+  if (!tl) {
+    tl = document.createElement('div');
+    tl.id = 'timeline';
+    tl.className = 'step-timeline';
+    document.getElementById('chat').appendChild(tl);
   }
-  
-  // Sectors table
-  if (analysis.sectors && analysis.sectors.length) {
-    html += '<h3>📋 推荐板块</h3>';
+  let el = document.getElementById('step-' + id);
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'step-' + id;
+    el.className = 'step-item';
+    tl.appendChild(el);
   }
-  
-  el.innerHTML = html;
+  el.className = 'step-item ' + status;
+  el.innerHTML = '<div class="step-label">' + label + '</div>'
+    + '<div class="step-title">' + title + '</div>'
+    + (detail ? '<div class="step-detail">' + detail + '</div>' : '');
+  scrollDown();
 }
 
+function clearTimeline() {
+  const tl = document.getElementById('timeline');
+  if (tl) tl.remove();
+}
+
+// ── SSE 流式分析 ──
 async function quickAction(text) {
   document.getElementById('userInput').value = text;
-  await sendMessage();
+  sendMessage();
 }
 
-async function sendMessage() {
+function sendMessage() {
   const input = document.getElementById('userInput');
   const text = input.value.trim();
   if (!text) return;
-  
+
+  // 显示用户消息
   addMsg(text, 'user');
   input.value = '';
-  
-  // Start macro analysis
   setStatus(true);
-  addSystemLog('[SYS] 正在调用 DeepSeek 进行宏观分析…');
-  
-  try {
-    const step1Resp = await fetch('/api/step1_macro', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({})
-    });
-    
-    if (!step1Resp.ok) {
-      // Might redirect to login
-      if (step1Resp.status === 302 || step1Resp.redirected) {
-        window.location.href = '/login';
-        return;
-      }
-      throw new Error(`HTTP ${step1Resp.status}`);
-    }
-    
-    const step1Data = await step1Resp.json();
-    if (!step1Data.success) {
-      addSystemLog(`[FAIL] 启动分析失败: ${step1Data.message || '未知错误'}`, 'fail');
-      setStatus(false);
-      return;
-    }
-    
-    // Poll for status (uses the real pollAnalysis below)
-    pollAnalysis();
+  clearTimeline();
 
-  } catch (e) {
-    addSystemLog(`[FAIL] ${e.message}`, 'fail');
+  // 断开旧连接
+  if (eventSource) eventSource.close();
+
+  // 建立 SSE 连接
+  eventSource = new EventSource('/api/analyze?' + new URLSearchParams({q: text}));
+
+  // ── 节点完成事件 ──
+  eventSource.addEventListener('node_done', e => {
+    const d = JSON.parse(e.data);
+
+    if (d.node === 'macro') {
+      addTimelineStep('macro', 'Step 1', '宏观分析',
+        (d.sectors||[]).join(' • ') + ' (' + (d.sectors||[]).length + ' 个板块)', 'done');
+      if (d.macro_reasoning) {
+        addMsg('🤖 ' + d.macro_reasoning.slice(0, 500) + (d.macro_reasoning.length > 500 ? '…' : ''), 'ai');
+      }
+    }
+
+    if (d.node === 'fetch') {
+      addTimelineStep('fetch', 'Step 2', '成分股提取',
+        (d.candidate_count||0) + ' 只候选', 'done');
+    }
+
+    if (d.node === 'score') {
+      addTimelineStep('score', 'Step 3', '量化评分',
+        (d.scored_count||0) + ' 只完成', 'done');
+    }
+
+    if (d.node === 'rank') {
+      addTimelineStep('rank', 'Step 4', '精选排序',
+        'Top ' + (d.top_count||0), 'done');
+      if (d.top_picks && d.top_picks.length) {
+        addCards(d.top_picks);
+      }
+      if (d.summary) {
+        addMsg(d.summary, 'system');
+      }
+    }
+
+    // 错误处理
+    if (d.error) {
+      addTimelineStep(d.node, '✕', d.node, d.error, 'fail');
+    }
+  });
+
+  // ── 错误事件 ──
+  eventSource.addEventListener('error', e => {
+    let msg = '分析出错';
+    try { const d = JSON.parse(e.data); msg = d.error || msg; } catch (_) {}
+    addMsg('❌ ' + msg, 'system');
     setStatus(false);
-  }
-}
+    eventSource.close();
+  });
 
-async function pollAnalysis() {
-  // Use the SSE-like polling on /api/status
-  let attempts = 0;
-  const maxAttempts = 180; // 3 minutes max
-  
-  pollingId = setInterval(async () => {
-    attempts++;
-    try {
-      const resp = await fetch('/api/status');
-      const data = await resp.json();
-      
-      if (!data.success) return;
-      
-      // Process logs
-      if (data.logs && data.logs.length) {
-        const known = new Set();
-        document.querySelectorAll('.msg.system').forEach(el => known.add(el.textContent));
-        data.logs.forEach(log => {
-          const text = log.text || log;
-          if (!known.has(text)) {
-            const cls = text.includes('[PASS]') ? 'pass' : text.includes('[FAIL]') ? 'fail' : '';
-            addSystemLog(text, cls);
-          }
-        });
-      }
-      
-      // Check if analysis complete or errored
-      if (data.state && data.state.error) {
-        clearInterval(pollingId);
-        addSystemLog(`[FAIL] 分析出错: ${data.state.error}`, 'fail');
-        setStatus(false);
-        return;
-      }
-      
-      if (data.state && data.state.ai_sectors && data.state.ai_sectors.length) {
-        currentSectors = data.state.ai_sectors;
-        clearInterval(pollingId);
-        
-        // Show sectors
-        addSystemLog(`[PASS] AI 已识别 ${currentSectors.length} 个板块: ${currentSectors.join(', ')}`, 'pass');
-        
-        if (data.state.ai_reasoning) {
-          addSummary({ reasoning: data.state.ai_reasoning });
-        }
-        
-        // Start Step 2
-        await fetchStep2(currentSectors);
-        return;
-      }
-      
-      if (attempts >= maxAttempts) {
-        clearInterval(pollingId);
-        addSystemLog('[FAIL] 分析超时，请重试', 'fail');
-        setStatus(false);
-      }
-    } catch (e) {
-      // Silent retry
-    }
-  }, 2000);
-}
-
-async function fetchStep2(sectors) {
-  addSystemLog(`📋 正在提取 [${sectors.join(', ')}] 的成分股…`);
-  
-  try {
-    const resp = await fetch('/api/step2_fetch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sectors })
-    });
-    const data = await resp.json();
-    
-    if (!data.success) {
-      addSystemLog(`[FAIL] 成分股提取失败: ${data.message || '未知错误'}`, 'fail');
-      setStatus(false);
-      return;
-    }
-    
-    // Poll Step 2 status
-    await pollStep2();
-    
-  } catch (e) {
-    addSystemLog(`[FAIL] ${e.message}`, 'fail');
+  // ── 结束事件 ──
+  eventSource.addEventListener('end', () => {
     setStatus(false);
-  }
+    eventSource.close();
+  });
+
+  // ── 连接错误 ──
+  eventSource.onerror = () => {
+    // EventSource 在某些浏览器会自动重连，手动关掉
+    if (eventSource.readyState === EventSource.CLOSED) {
+      setStatus(false);
+    }
+  };
 }
 
-async function pollStep2() {
-  let attempts = 0;
-  
-  const intv = setInterval(async () => {
-    attempts++;
-    try {
-      const resp = await fetch('/api/status');
-      const data = await resp.json();
-      
-      if (!data.success) return;
-      
-      // Process logs
-      if (data.logs && data.logs.length) {
-        const known = new Set();
-        document.querySelectorAll('.msg.system').forEach(el => known.add(el.textContent));
-        data.logs.forEach(log => {
-          const text = log.text || log;
-          if (!known.has(text)) {
-            const cls = text.includes('[PASS]') ? 'pass' : text.includes('[FAIL]') ? 'fail' : '';
-            addSystemLog(text, cls);
-          }
-        });
-      }
-      
-      if (data.state && data.state.error) {
-        clearInterval(intv);
-        addSystemLog(`[FAIL] ${data.state.error}`, 'fail');
-        setStatus(false);
-        return;
-      }
-      
-      // Check for scoring results
-      if (data.state && data.state.scoring_results) {
-        clearInterval(intv);
-        const results = data.state.scoring_results;
-        addSystemLog(`[PASS] 筛选完成！找到 ${results.top_stocks ? results.top_stocks.length : results.length || 0} 支潜力股`, 'pass');
-        
-        // Show as cards
-        const stocks = results.top_stocks || results || [];
-        if (stocks.length) addCards(stocks);
-        
-        setStatus(false);
-        return;
-      }
-      
-      if (attempts >= 120) {
-        clearInterval(intv);
-        addSystemLog('[FAIL] 分析超时', 'fail');
-        setStatus(false);
-      }
-    } catch (e) {}
-  }, 2000);
-}
-
-// Enter key — desktop + mobile compatible (keydown is most reliable)
+// ── Enter 键 ──
 const userInput = document.getElementById('userInput');
 userInput.addEventListener('keydown', e => {
   if (e.key === 'Enter' && !e.shiftKey) {

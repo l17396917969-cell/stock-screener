@@ -869,12 +869,12 @@ def admin_reset_password(user_id):
 # ═══════════════════════════════════════════════
 # LangGraph SSE 流式分析路由
 # ═══════════════════════════════════════════════
-@app.route("/api/analyze", methods=["POST"])
+@app.route("/api/analyze", methods=["GET"])
 @login_required
 def analyze_stream():
     """LangGraph 4 步选股 pipeline，通过 SSE 实时推送每步结果。"""
     data = request.json or {}
-    user_query = data.get("q", "帮我找被低估的A股价值洼地")
+    user_query = data.get("q") or request.args.get("q", "帮我找被低估的A股价值洼地")
 
     initial_state: ScreenerState = {
         "user_query": user_query,
