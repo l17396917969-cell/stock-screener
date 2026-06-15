@@ -654,51 +654,75 @@ def get_board_stocks(board_name):
     return _get_concept_stocks_fallback(board_name)
 
 
-# ── Baostock 行业数据缓存（全量查询太慢，缓存到内存） ──
-_industry_cache: dict | None = None  # pandas DataFrame or None
+def _get_concept_stocks_fallback(board_name):
+    """Load board→stocks mapping from cached JSON file (auto-generated on first call)."""
+    import json
+    import pandas as pd
+    from pathlib import Path
 
-def _get_industry_cache():
-    """Load Baostock industry data once, cache in memory."""
-    global _industry_cache
-    if _industry_cache is not None:
-        return _industry_cache
+    cache_path = Path("/opt/stock-screener-shared/board_stocks.json")
+
+    # Auto-generate cache on first call
+    if not cache_path.exists():
+        logger.info("Building board_stocks.json cache (one-time, ~60s)...")
+        try:
+            import baostock as bs
+            bs.login()
+            rs = bs.query_stock_industry()
+            stock_map = {}
+            while rs.next():
+                row = rs.get_row_data()
+                if row[3]:
+                    code = row[1].split(".")[1]
+                    name = row[2]
+                    ind = row[3]
+                    if ind not in stock_map:
+                        stock_map[ind] = []
+                    stock_map[ind].append({"code": code, "name": name})
+            bs.logout()
+
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(cache_path, "w") as f:
+                json.dump(stock_map, f, ensure_ascii=False)
+            logger.info(f"Cache built: {len(stock_map)} industries, saved to {cache_path}")
+        except Exception as e:
+            logger.warning(f"Failed to build cache: {e}")
+            return None
+
+    # Load from cache
     try:
-        import baostock as bs
-        bs.login()
-        rs = bs.query_stock_industry()
-        data = rs.get_data()
-        bs.logout()
-        if data is not None and not data.empty:
-            _industry_cache = data
-            logger.info(f"Baostock industry cache loaded: {len(data)} entries")
-        return _industry_cache
-    except Exception as e:
-        logger.warning(f"Failed to load Baostock industry cache: {e}")
+        with open(cache_path) as f:
+            stock_map = json.load(f)
+    except Exception:
         return None
 
+    # Map board names → CSIC industry names for matching
+    BOARD_TO_CSIC = {
+        "半导体": "计算机、通信和其他电子设备制造业",
+        "元件": "计算机、通信和其他电子设备制造业",
+        "消费电子": "计算机、通信和其他电子设备制造业",
+    }
 
-def _get_concept_stocks_fallback(board_name):
-    """Baostock fallback: query industry constituents from cache."""
-    try:
-        data = _get_industry_cache()
-        if data is None or data.empty:
-            return None
+    csic_key = BOARD_TO_CSIC.get(board_name)
+    if not csic_key:
+        logger.warning(f"No CSIC mapping for board '{board_name}'")
+        return None
 
-        matched = data[data["industry"].str.contains(board_name, na=False)]
-        if matched.empty:
-            logger.warning(f"Baostock: no industry matching '{board_name}'")
-            return None
+    # Find matching industry
+    matched_industry = None
+    for ind_name in stock_map:
+        if csic_key in ind_name:
+            matched_industry = ind_name
+            break
 
-        import pandas as pd
-        result = pd.DataFrame({
-            "代码": [c.split(".")[1] for c in matched["code"]],
-            "名称": matched["code_name"].values,
-        })
-        logger.info(f"Baostock '{board_name}' → {len(result)} stocks")
-        return result
-    except Exception as e:
-        logger.warning(f"Baostock fallback also failed: {e}")
-    return None
+    if not matched_industry:
+        logger.warning(f"No CSIC industry matching '{csic_key}'")
+        return None
+
+    stocks = stock_map[matched_industry]
+    df = pd.DataFrame({"代码": [s["code"] for s in stocks], "名称": [s["name"] for s in stocks]})
+    logger.info(f"Cache '{board_name}' ({matched_industry}) → {len(df)} stocks")
+    return df
 
 
 # ── 大盘与热门板块快照 (For AI Sector Analysis) ───────────────
