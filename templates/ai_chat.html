@@ -424,11 +424,8 @@ function sendMessage() {
   setStatus(true);
   clearTimeline();
 
-  // ⚡ 立即展示 4 步进度条（全部 active）
-  addTimelineStep('macro', 'Step 1', '宏观分析', '调用 DeepSeek…', 'active');
-  addTimelineStep('fetch', 'Step 2', '成分股提取', '等待中', 'active');
-  addTimelineStep('score', 'Step 3', '量化评分', '等待中', 'active');
-  addTimelineStep('rank', 'Step 4', '精选排序', '等待中', 'active');
+  // ⚡ 只展示 Step 1，让用户知道有动作
+  addTimelineStep('macro', 'Step 1', '宏观分析', '正在调用 DeepSeek 分析市场…', 'active');
 
   // 断开旧连接
   if (eventSource) eventSource.close();
