@@ -640,13 +640,16 @@ def get_board_stocks(board_name):
     logger.info(f"Fetching stocks for board: {board_name}...")
     sw_code = _fuzzy_match_sw_code(board_name)
     if sw_code:
-        with _akshare_semaphore:
-            _akshare_throttle()
-            df = ak.sw_index_third_cons(symbol=sw_code)
-        if df is not None and not df.empty:
-            df = df.rename(columns={"股票代码": "代码", "股票简称": "名称"})
-            logger.info(f"Board '{board_name}' ({sw_code}) → {len(df)} stocks")
-            return df
+        try:
+            with _akshare_semaphore:
+                _akshare_throttle()
+                df = ak.sw_index_third_cons(symbol=sw_code)
+            if df is not None and not df.empty:
+                df = df.rename(columns={"股票代码": "代码", "股票简称": "名称"})
+                logger.info(f"Board '{board_name}' ({sw_code}) → {len(df)} stocks")
+                return df
+        except Exception as e:
+            logger.warning(f"SW index_third_cons failed for '{board_name}': {e}")
     logger.warning(f"No SW match for '{board_name}', trying EastMoney concept board...")
     return _get_concept_stocks_fallback(board_name)
 
