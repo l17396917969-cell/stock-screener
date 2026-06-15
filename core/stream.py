@@ -44,15 +44,11 @@ def run_graph_with_queue(initial_state: dict) -> queue.Queue:
                     if node_name == "macro":
                         payload["sectors"] = delta.get("sectors", [])
                         payload["macro_reasoning"] = delta.get("macro_reasoning", "")
-                    elif node_name == "fetch":
-                        payload["candidate_count"] = len(delta.get("candidate_stocks", []))
-                    elif node_name == "score":
-                        payload["scored_count"] = len(delta.get("scored_stocks", []))
-                        payload["batch_progress"] = delta.get("batch_progress", {})
-                    elif node_name == "rank":
+                    elif node_name == "lookup":
                         payload["top_count"] = len(delta.get("top_picks", []))
                         payload["top_picks"] = delta.get("top_picks", [])
                         payload["summary"] = delta.get("summary", "")
+                        payload["candidate_count"] = len(delta.get("candidate_stocks", []))
 
                     # 也检查 error
                     if delta.get("error"):

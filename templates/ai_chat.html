@@ -376,6 +376,12 @@ function addCards(stocks) {
   stocks.forEach(s => {
     const card = document.createElement('div');
     card.className = 'stock-card';
+    card.style.cursor = 'pointer';
+    card.title = '点击查看深度分析';
+    card.onclick = () => {
+      document.getElementById('userInput').value = '分析 ' + (s.code || '');
+      sendMessage();
+    };
     card.innerHTML = `
       <div class="code">${s.code || '000000'}</div>
       <div class="name">${s.name || '—'}</div>
@@ -543,30 +549,20 @@ function sendMessage() {
     if (d.node === 'macro') {
       addTimelineStep('macro', 'Step 1', '宏观分析',
         (d.sectors||[]).join(' • ') + ' (' + (d.sectors||[]).length + ' 个板块)', 'done');
+      addTimelineStep('lookup', 'Step 2', '缓存查分', '查询中…', 'active');
       if (d.macro_reasoning) {
         addMsg(md2html(d.macro_reasoning), 'ai');
       }
     }
 
-    if (d.node === 'fetch') {
-      addTimelineStep('fetch', 'Step 2', '成分股提取',
-        (d.candidate_count||0) + ' 只候选', 'done');
-    }
-
-    if (d.node === 'score') {
-      addTimelineStep('score', 'Step 3', '量化评分',
-        (d.scored_count||0) + ' 只完成', 'done');
-    }
-
-    if (d.node === 'rank') {
-      addTimelineStep('rank', 'Step 4', '精选排序',
-        'Top ' + (d.top_count||0), 'done');
+    if (d.node === 'lookup') {
+      addTimelineStep('lookup', 'Step 2', '缓存查分',
+        'Top ' + (d.top_count||0) + ' · ' + (d.summary||''), 'done');
       if (d.top_picks && d.top_picks.length) {
         addCards(d.top_picks);
       }
-      if (d.summary) {
-        addMsg(d.summary, 'system');
-      }
+      setStatus(false);
+      eventSource.close();
     }
 
     // 错误处理
