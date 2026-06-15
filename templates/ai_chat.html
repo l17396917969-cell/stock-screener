@@ -280,6 +280,7 @@
 <header>
   <div class="logo">📊</div>
   <h1>Stock Screener AI</h1>
+  <a href="/scores" style="color:var(--muted);text-decoration:none;font-size:13px;padding:4px 10px;border:1px solid var(--border);border-radius:6px;transition:all .2s" onmouseover="this.style.borderColor='var(--primary)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)'">📋 评分缓存</a>
   <div class="status"><span class="dot off" id="statusDot"></span><span id="statusText">就绪</span></div>
   <a href="#" onclick="document.getElementById('logoutForm').submit();return false" style="color:var(--muted);font-size:12px;text-decoration:none;margin-left:8px">⏻</a>
   <form id="logoutForm" method="POST" action="/logout" style="display:none"></form>
