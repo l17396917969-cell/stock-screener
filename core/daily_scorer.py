@@ -1,178 +1,105 @@
-"""每日全量股票评分 — Cron 脚本
+"""每日全量股票评分 — Cron 脚本 (SQLite 版)
 
-遍历 board_stocks.json 中所有行业成分股，
-逐只 deep_screen_stock + calculate_score，
-输出 scored_stocks.json 供对话查询。
-
-用法: python core/daily_scorer.py
+遍历 board_stocks.json 中所有行业成分股，逐只评分写入 scores.db。
+用法: python core/daily_scorer.py [--limit N] [--force]
 """
 
-import json
-import logging
-import os
-import sys
-import time
-import traceback
+import json, logging, os, sys, time, traceback
 from pathlib import Path
-
-# 确保项目路径可用
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
 from config import SCRENNER_CONFIG
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger("daily_scorer")
 
-# 输出路径 — 放在 shared 目录，与数据库同级
-SHARED_DIR = os.environ.get(
-    "STOCK_SHARED_DIR",
-    "/opt/stock-screener-shared",
-)
-OUTPUT_FILE = os.path.join(SHARED_DIR, "scored_stocks.json")
+SHARED_DIR = os.environ.get("STOCK_SHARED_DIR", "/opt/stock-screener-shared")
+BOARD_CACHE = os.path.join(SHARED_DIR, "board_stocks.json")
 
-# 预设评分行业列表 (价值投资关注的主要板块)
 DEFAULT_SECTORS = [
-    "元件", "光学光电子", "电子化学品Ⅱ",
-    "白酒Ⅱ", "食品加工", "调味品Ⅱ",
-    "化学制药", "医疗器械", "生物制品",
-    "电池", "光伏设备", "电网设备",
-    "半导体", "消费电子", "通信设备",
-    "乘用车", "汽车零部件",
-    "工业金属", "能源金属",
-    "银行", "证券Ⅱ", "保险Ⅱ",
-    "电力", "煤炭开采", "石油化工",
+    "白酒", "食品加工", "调味品", "化学制药", "医疗器械", "生物制品",
+    "电池", "光伏", "电网", "半导体", "消费电子", "通信设备",
+    "乘用车", "汽车零部件", "工业金属", "能源金属",
+    "银行", "证券", "保险", "电力", "煤炭", "石油",
+    "元件", "光学光电子", "电子化学品", "家电", "化妆品", "中药", "软件", "计算机",
 ]
 
-# 单次运行最多评分只数 (防止超时)
-MAX_STOCKS = 500
-
-
-def load_existing_scores() -> dict:
-    """加载已有评分结果。"""
-    if os.path.exists(OUTPUT_FILE):
-        try:
-            with open(OUTPUT_FILE) as f:
-                return json.load(f)
-        except Exception:
-            pass
-    return {}
-
-
-def save_scores(scores: dict) -> None:
-    """原子写入评分结果。"""
-    tmp = OUTPUT_FILE + ".tmp"
-    os.makedirs(os.path.dirname(OUTPUT_FILE), exist_ok=True)
-    with open(tmp, "w") as f:
-        json.dump(scores, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, OUTPUT_FILE)
-    logger.info(f"Saved {len(scores)} stocks → {OUTPUT_FILE}")
-
-
-def load_board_stocks() -> dict[str, dict]:
-    """加载全量成分股缓存。"""
-    cache_path = os.path.join(SHARED_DIR, "board_stocks.json")
-    if os.path.exists(cache_path):
-        with open(cache_path) as f:
+def load_board_stocks():
+    if os.path.exists(BOARD_CACHE):
+        with open(BOARD_CACHE) as f:
             data = json.load(f)
         logger.info(f"Loaded board_stocks.json: {len(data)} boards")
         return data
-    logger.warning("board_stocks.json not found")
     return {}
 
+def build_name_map(board_data):
+    nm = {}
+    for stocks in board_data.values():
+        for item in stocks:
+            code = str(item.get("code","")).zfill(6)
+            name = str(item.get("name","")).strip()
+            if code and name: nm[code] = name
+    logger.info(f"Name map: {len(nm)} codes")
+    return nm
 
-def collect_stocks(board_data: dict, sectors: list[str]) -> list[tuple[str, str]]:
-    """从板块数据中提取候选股 (code, name)。"""
-    seen = set()
-    stocks = []
-    for sector in sectors:
-        board = board_data.get(sector, [])
-        for item in board:
-            code = str(item.get("code", "")).zfill(6)
-            name = str(item.get("name", ""))
-            if code and code not in seen and len(code) == 6:
-                seen.add(code)
-                stocks.append((code, name))
-    logger.info(f"Collected {len(stocks)} unique stocks from {len(sectors)} sectors")
+def collect_stocks(board_data, sectors, name_map, existing_codes):
+    seen, stocks = set(), []
+    for kw in sectors:
+        for bk in [k for k in board_data if kw in k]:
+            for item in board_data[bk]:
+                code = str(item.get("code","")).zfill(6)
+                if code and code not in seen and len(code) == 6:
+                    seen.add(code)
+                    stocks.append((code, name_map.get(code, item.get("name","")), bk))
+    if existing_codes:
+        new = [(c,n,s) for c,n,s in stocks if c not in existing_codes]
+        logger.info(f"Candidates: {len(stocks)} total, {len(stocks)-len(new)} scored -> {len(new)} to go")
+        return new
+    logger.info(f"Collected {len(stocks)} unique stocks")
     return stocks
 
-
-def score_one_stock(code: str, name: str) -> dict | None:
-    """对单只股票评分。"""
+def score_one_stock(code, name, sector):
     try:
         from core.stock_screener import deep_screen_stock
         from core.scorer import calculate_score
         from core.data_fetcher import get_index_data
-
         index_hist = get_index_data()
         passed, reason, yf_data = deep_screen_stock(code, index_hist=index_hist)
-
         if yf_data is None:
-            return {"code": code, "name": name, "passed": False, "reason": reason, "score": 0}
-
-        score_report = calculate_score(code, {"name": name, "code": code}, yf_data)
-
-        return {
-            "code": code,
-            "name": name,
-            "passed": passed,
-            "reason": reason,
-            "score": score_report.get("total_score", 0) if score_report else 0,
-            "pe": score_report.get("pe", 0) if score_report else 0,
-            "pb": score_report.get("pb", 0) if score_report else 0,
-            "roe": score_report.get("roe", 0) if score_report else 0,
-            "mcap": score_report.get("market_cap", 0) if score_report else 0,
-            "sector": score_report.get("sector", "") if score_report else "",
-            "scored_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        }
+            return {"code":code,"name":name,"sector":sector,"passed":False,"reason":reason or "数据获取失败","score":0,"scored_at":time.strftime("%Y-%m-%d %H:%M:%S")}
+        sr = calculate_score(code, {"name":name,"code":code}, yf_data)
+        return {"code":code,"name":name,"passed":passed,"reason":reason or "","score":sr.get("total_score",0) if sr else 0,"pe":sr.get("pe",0) if sr else 0,"pb":sr.get("pb",0) if sr else 0,"roe":sr.get("roe",0) if sr else 0,"mcap":sr.get("market_cap",0) if sr else 0,"sector":sector,"scored_at":time.strftime("%Y-%m-%d %H:%M:%S")}
     except Exception:
         logger.error(f"Score {code} {name} failed: {traceback.format_exc()}")
-        return {"code": code, "name": name, "passed": False, "reason": "评分异常", "score": 0}
+        return {"code":code,"name":name,"sector":sector,"passed":False,"reason":"评分异常","score":0,"scored_at":time.strftime("%Y-%m-%d %H:%M:%S")}
 
-
-def main():
-    logger.info("=== Daily Scorer Start ===")
+def main(limit=50, force=False):
+    logger.info("=== Daily Scorer Start (SQLite) ===")
     t0 = time.time()
-
-    # 加载已有评分
-    scores = load_existing_scores()
-    logger.info(f"Existing scores: {len(scores)} stocks")
-
-    # 加载板块数据
     board_data = load_board_stocks()
-    if not board_data:
-        logger.error("No board data — abort")
-        return
-
-    # 收集候选股
-    candidates = collect_stocks(board_data, DEFAULT_SECTORS)
-    if not candidates:
-        logger.error("No candidates — abort")
-        return
-
-    # 只评分新股票 或 更新全部 (先做增量，保底上限)
-    to_score = [(c, n) for c, n in candidates[:MAX_STOCKS]]
-
+    if not board_data: return logger.error("No board data")
+    name_map = build_name_map(board_data)
+    from core.score_store import count as db_count, get_all, upsert_score
+    existing = set()
+    if not force:
+        try:
+            rows, _ = get_all(limit=99999)
+            existing = {r["code"] for r in rows}
+        except: pass
+    candidates = collect_stocks(board_data, DEFAULT_SECTORS, name_map, set() if force else existing)
+    if not candidates: return logger.info("All scored -- nothing to do")
+    to_score = candidates[:limit]
     scored = 0
-    for i, (code, name) in enumerate(to_score):
-        result = score_one_stock(code, name)
-        if result:
-            scores[code] = result
-            scored += 1
-            if scored % 20 == 0:
-                logger.info(f"Progress: {scored}/{len(to_score)}")
-
-        # 限速: yfinance 5 分钟内最多 ~30 次，所以间隔 12s
-        time.sleep(12)
-
-        # 每 50 只存一次
-        if scored % 50 == 0:
-            save_scores(scores)
-
-    save_scores(scores)
-
-    elapsed = time.time() - t0
-    logger.info(f"=== Done: {scored} stocks in {elapsed:.0f}s ===")
-
+    for i, (code, name, sector) in enumerate(to_score):
+        r = score_one_stock(code, name, sector)
+        if r: upsert_score(r); scored += 1
+        if scored % 10 == 0: logger.info(f"Progress: {scored}/{len(to_score)}")
+        time.sleep(15)
+    logger.info(f"=== Done: {scored} new in {time.time()-t0:.0f}s, db total={db_count()} ===")
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    p = argparse.ArgumentParser()
+    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--force", action="store_true")
+    args = p.parse_args()
+    main(limit=args.limit, force=args.force)

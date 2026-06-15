@@ -37,6 +37,7 @@ from core.screener_state import ScreenerState
 from core.stream import run_graph_with_queue, sse_generator, run_single_stock_with_queue
 from core.single_stock_state import SingleStockState
 from core.single_stock_graph import build_single_stock_graph
+from core.score_store import get_all as store_get_all, get_stats as store_get_stats, get_by_code as store_get_by_code
 from config import SCRENNER_CONFIG
 
 app = Flask(__name__)
@@ -981,6 +982,50 @@ def analyze_stock_stream():
         },
     )
 
+
+# ═══════════════════════════════════════════════
+# 缓存评分浏览页面
+# ═══════════════════════════════════════════════
+@app.route("/scores")
+@login_required
+def scores_page():
+    return render_template("scores.html")
+
+@app.route("/api/scores")
+@login_required
+def api_scores():
+    search = request.args.get("search", "").strip()
+    sector = request.args.get("sector", "").strip()
+    sort_by = request.args.get("sort", "score")
+    sort_dir = request.args.get("dir", "DESC")
+    try: offset = int(request.args.get("offset", 0)); limit = min(int(request.args.get("limit", 50)), 200)
+    except (TypeError, ValueError): offset, limit = 0, 50
+    rows, total = store_get_all(search=search, sector=sector, sort_by=sort_by, sort_dir=sort_dir, offset=offset, limit=limit)
+    return jsonify({"success": True, "data": rows, "total": total, "offset": offset, "limit": limit})
+
+@app.route("/api/scores/stats")
+@login_required
+def api_scores_stats():
+    return jsonify({"success": True, "stats": store_get_stats()})
+
+@app.route("/api/scores/<code>")
+@login_required
+def api_score_detail(code: str):
+    row = store_get_by_code(code)
+    if not row: return jsonify({"success": False, "message": f"未找到 {code} 的评分数据"}), 404
+    return jsonify({"success": True, "data": row})
+
+@app.route("/api/scores/run", methods=["POST"])
+@login_required
+@admin_required
+def api_scores_run():
+    import subprocess
+    cwd = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    try:
+        proc = subprocess.Popen(["python3", "core/daily_scorer.py", "--limit", "20"], cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return jsonify({"success": True, "pid": proc.pid, "message": "评分任务已在后台启动"})
+    except Exception as e:
+        return jsonify({"success": False, "message": str(e)}), 500
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)

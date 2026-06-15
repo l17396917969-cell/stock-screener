@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>评分缓存浏览器 — Stock Screener</title>
+<style>
+  :root {
+    --bg: #0a0a0f; --surface: #14141f; --card: #1a1a2e; --primary: #6366f1;
+    --accent: #22c55e; --text: #e2e8f0; --muted: #94a3b8; --border: #1e293b;
+    --danger: #ef4444; --warn: #f59e0b; --bad: #ef4444; --mid: #f59e0b;
+    --good: #22c55e; --great: #06b6d4;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family:-apple-system,'SF Pro Text','PingFang SC',sans-serif; min-height:100dvh; }
+
+  header { padding:16px 24px; background:var(--surface); border-bottom:1px solid var(--border); display:flex; align-items:center; gap:16px; position:sticky; top:0; z-index:10; }
+  header .logo { width:36px; height:36px; background:linear-gradient(135deg,var(--primary),#a855f7); border-radius:10px; display:flex; align-items:center; justify-content:center; font-size:18px; }
+  header h1 { font-size:18px; font-weight:600; }
+  header nav { margin-left:auto; display:flex; gap:8px; }
+  header nav a { color:var(--muted); text-decoration:none; font-size:14px; padding:6px 12px; border-radius:6px; transition:all .2s; }
+  header nav a:hover, header nav a.active { color:var(--text); background:var(--border); }
+
+  .stats-bar { display:flex; gap:16px; padding:16px 24px; flex-wrap:wrap; }
+  .stat-card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:12px 18px; min-width:120px; }
+  .stat-card .label { font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .stat-card .value { font-size:22px; font-weight:700; }
+
+  .toolbar { display:flex; gap:10px; padding:0 24px 16px; flex-wrap:wrap; align-items:center; }
+  .toolbar input, .toolbar select { background:var(--surface); border:1px solid var(--border); border-radius:8px; color:var(--text); padding:8px 14px; font-size:14px; outline:none; }
+  .toolbar input:focus, .toolbar select:focus { border-color:var(--primary); }
+  .toolbar input { flex:1; min-width:200px; max-width:320px; }
+  .toolbar select { cursor:pointer; }
+  .toolbar .btn { background:var(--primary); color:#fff; border:none; padding:8px 18px; border-radius:8px; font-size:14px; cursor:pointer; }
+  .toolbar .btn-secondary { background:var(--surface); color:var(--muted); border:1px solid var(--border); }
+
+  .table-wrap { padding:0 24px 24px; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th { text-align:left; padding:10px 14px; color:var(--muted); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.5px; background:var(--surface); border-bottom:1px solid var(--border); cursor:pointer; user-select:none; white-space:nowrap; }
+  th:hover { color:var(--text); }
+  th.sorted { color:var(--primary); }
+  td { padding:10px 14px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  tbody tr { transition:background .15s; }
+  tbody tr:hover { background:rgba(99,102,241,.06); cursor:pointer; }
+
+  .score-badge { display:inline-block; padding:2px 10px; border-radius:99px; font-weight:600; font-size:13px; }
+  .score-badge.great { background:rgba(6,182,212,.15); color:var(--great); }
+  .score-badge.good  { background:rgba(34,197,94,.15); color:var(--good); }
+  .score-badge.mid   { background:rgba(245,158,11,.15); color:var(--warn); }
+  .score-badge.bad   { background:rgba(239,68,68,.15); color:var(--bad); }
+  .passed-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; }
+  .passed-dot.yes { background:var(--accent); }
+  .passed-dot.no  { background:var(--muted); }
+
+  .pagination { display:flex; align-items:center; justify-content:center; gap:10px; padding:16px 24px 32px; font-size:14px; color:var(--muted); }
+  .pagination button { background:var(--surface); border:1px solid var(--border); color:var(--text); padding:6px 14px; border-radius:6px; cursor:pointer; font-size:13px; }
+  .pagination button:disabled { opacity:.3; cursor:default; }
+
+  .empty-state { text-align:center; padding:60px 20px; color:var(--muted); }
+  .loading { text-align:center; padding:40px; color:var(--muted); }
+  .spinner { display:inline-block; width:24px; height:24px; border:2px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:spin .6s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  @media (max-width:768px) { header { padding:12px 14px; gap:8px; } .stats-bar { padding:12px 14px; gap:8px; } .toolbar { padding:0 14px 12px; } .toolbar input { max-width:100%; } .table-wrap { padding:0 8px 16px; } td,th { padding:8px 10px; font-size:12px; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">📊</div>
+  <h1>评分缓存浏览器</h1>
+  <nav>
+    <a href="/ai">AI 对话</a>
+    <a href="/scores" class="active">缓存评分</a>
+    <a href="/">主页</a>
+  </nav>
+</header>
+
+<div class="stats-bar" id="statsBar">
+  <div class="stat-card"><div class="label">缓存总数</div><div class="value" id="statTotal">-</div></div>
+  <div class="stat-card"><div class="label">通过初筛</div><div class="value" style="color:var(--good)" id="statPassed">-</div></div>
+  <div class="stat-card"><div class="label">平均分</div><div class="value" style="color:var(--warn)" id="statAvg">-</div></div>
+  <div class="stat-card"><div class="label">最高分</div><div class="value" style="color:var(--good)" id="statMax">-</div></div>
+  <div class="stat-card"><div class="label">最近更新</div><div class="value" style="font-size:13px" id="statLatest">-</div></div>
+</div>
+
+<div class="toolbar">
+  <input type="text" id="searchInput" placeholder="搜索代码或名称…" autofocus>
+  <select id="sortSelect">
+    <option value="score">按评分</option>
+    <option value="pe">按 PE</option>
+    <option value="roe">按 ROE</option>
+    <option value="mcap">按市值</option>
+    <option value="name">按名称</option>
+    <option value="scored_at">按时间</option>
+  </select>
+  <select id="dirSelect">
+    <option value="DESC">降序</option>
+    <option value="ASC">升序</option>
+  </select>
+  <button class="btn" id="refreshBtn">刷新</button>
+  <button class="btn btn-secondary" id="runScorerBtn">触发评分</button>
+</div>
+
+<div class="table-wrap">
+  <div class="loading" id="loading"><div class="spinner"></div><p>加载中…</p></div>
+  <div class="empty-state" id="empty" style="display:none"><div style="font-size:48px;margin-bottom:12px">📭</div><p>暂无评分缓存数据</p><p style="font-size:13px">点击「触发评分」或等待凌晨 Cron 自动运行</p></div>
+  <table id="scoreTable" style="display:none">
+    <thead><tr>
+      <th data-sort="code">代码</th>
+      <th data-sort="name">名称</th>
+      <th data-sort="sector">板块</th>
+      <th data-sort="score">评分 ▾</th>
+      <th data-sort="pe">PE</th>
+      <th data-sort="roe">ROE</th>
+      <th data-sort="mcap">市值(亿)</th>
+      <th data-sort="scored_at">评分时间</th>
+      <th>状态</th>
+    </tr></thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+</div>
+
+<div class="pagination" id="pagination" style="display:none">
+  <button id="prevBtn">上一页</button>
+  <span id="pageInfo">第 1 页</span>
+  <button id="nextBtn">下一页</button>
+</div>
+
+<script>
+let currentPage = 0, totalCount = 0;
+const PAGE_SIZE = 50;
+let currentSort = { by: 'score', dir: 'DESC' };
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadStats(); loadData();
+  document.getElementById('searchInput').addEventListener('input', debounce(()=>{currentPage=0;loadData();},300));
+  document.getElementById('sortSelect').addEventListener('change', ()=>{currentSort.by=document.getElementById('sortSelect').value;currentPage=0;loadData();});
+  document.getElementById('dirSelect').addEventListener('change', ()=>{currentSort.dir=document.getElementById('dirSelect').value;currentPage=0;loadData();});
+  document.getElementById('refreshBtn').addEventListener('click', ()=>{loadStats();loadData();});
+  document.getElementById('prevBtn').addEventListener('click', ()=>{if(currentPage>0){currentPage--;loadData();}});
+  document.getElementById('nextBtn').addEventListener('click', ()=>{if((currentPage+1)*PAGE_SIZE<totalCount){currentPage++;loadData();}});
+  document.querySelectorAll('th[data-sort]').forEach(th=>{th.addEventListener('click',()=>{const sb=th.dataset.sort;if(currentSort.by===sb){currentSort.dir=currentSort.dir==='DESC'?'ASC':'DESC';}else{currentSort.by=sb;currentSort.dir='DESC';}document.getElementById('sortSelect').value=currentSort.by;document.getElementById('dirSelect').value=currentSort.dir;currentPage=0;loadData();});});
+  document.getElementById('runScorerBtn').addEventListener('click', async ()=>{
+    const btn=document.getElementById('runScorerBtn');btn.textContent='运行中…';btn.disabled=true;
+    try{const res=await fetch('/api/scores/run',{method:'POST'});const d=await res.json();alert(d.success?'评分任务已启动，几分钟后刷新查看':'启动失败:'+(d.message||'未知错误'));}catch(e){alert('请求失败:'+e.message);}
+    btn.textContent='触发评分';btn.disabled=false;
+  });
+});
+
+async function loadStats(){
+  try{const d=await(await fetch('/api/scores/stats')).json();if(d.success&&d.stats){const s=d.stats;document.getElementById('statTotal').textContent=s.total||0;document.getElementById('statPassed').textContent=s.passed||0;document.getElementById('statAvg').textContent=s.avg_score||0;document.getElementById('statMax').textContent=s.max_score||0;document.getElementById('statLatest').textContent=s.latest_scored_at?s.latest_scored_at.slice(0,16):'-';}}catch(e){}
+}
+
+async function loadData(){
+  document.getElementById('loading').style.display='block';document.getElementById('scoreTable').style.display='none';document.getElementById('empty').style.display='none';
+  const search=document.getElementById('searchInput').value.trim();
+  const p=new URLSearchParams({search,sort:currentSort.by,dir:currentSort.dir,offset:currentPage*PAGE_SIZE,limit:PAGE_SIZE});
+  try{
+    const d=await(await fetch('/api/scores?'+p)).json();document.getElementById('loading').style.display='none';
+    if(!d.success||!d.data||d.data.length===0){document.getElementById('empty').style.display='block';document.getElementById('pagination').style.display='none';return;}
+    totalCount=d.total||0;renderTable(d.data);document.getElementById('scoreTable').style.display='table';document.getElementById('pagination').style.display='flex';
+    updatePagination();updateSortHeaders();
+  }catch(e){document.getElementById('loading').style.display='none';document.getElementById('empty').style.display='block';}
+}
+
+function renderTable(rows){
+  document.getElementById('tableBody').innerHTML=rows.map(r=>{
+    const score=r.score||0;
+    let cls=score>=70?'great':score>=50?'good':score>=30?'mid':'bad';
+    const mcap=r.mcap?(r.mcap/1e8).toFixed(1):'-';
+    const pe=r.pe?r.pe.toFixed(1):'-';
+    const roe=r.roe?r.roe.toFixed(1)+'%':'-';
+    const passed=r.passed?'<span class="passed-dot yes"></span>通过':'<span class="passed-dot no"></span>';
+    const time=r.scored_at?r.scored_at.slice(0,16):'-';
+    return `<tr onclick="openStock('${r.code}')"><td><code>${esc(r.code)}</code></td><td><strong>${esc(r.name)}</strong></td><td style="color:var(--muted);font-size:12px">${esc(r.sector||'')}</td><td><span class="score-badge ${cls}">${score}</span></td><td>${pe}</td><td>${roe}</td><td>${mcap}</td><td style="color:var(--muted);font-size:12px">${time}</td><td>${passed}</td></tr>`;
+  }).join('');
+}
+
+function updatePagination(){
+  const tp=Math.ceil(totalCount/PAGE_SIZE);
+  document.getElementById('pageInfo').textContent=`第 ${currentPage+1} / ${Math.max(1,tp)} 页 (共 ${totalCount} 只)`;
+  document.getElementById('prevBtn').disabled=currentPage===0;
+  document.getElementById('nextBtn').disabled=(currentPage+1)*PAGE_SIZE>=totalCount;
+}
+
+function updateSortHeaders(){
+  document.querySelectorAll('th[data-sort]').forEach(th=>{
+    th.classList.toggle('sorted',th.dataset.sort===currentSort.by);
+    th.innerHTML=th.innerHTML.replace(/[▾▴]/g,'')+(th.dataset.sort===currentSort.by?' '+(currentSort.dir==='DESC'?'▾':'▴'):'');
+  });
+}
+
+function openStock(code){ window.open('/ai?code='+code,'_blank'); }
+function esc(s){ const d=document.createElement('div');d.textContent=s||'';return d.innerHTML; }
+function debounce(fn,ms){ let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args),ms); }; }
+</script>
+</body>
+</html>

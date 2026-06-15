@@ -602,6 +602,18 @@ userInput.addEventListener('keydown', e => {
     sendMessage();
   }
 });
+// ── URL 参数：从 /scores 页面点过来时自动触发个股分析 ──
+(function autoFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('code');
+  if (code) {
+    setTimeout(() => {
+      document.getElementById('userInput').value = '分析 ' + code;
+      sendMessage();
+      window.history.replaceState({}, '', '/ai');
+    }, 400);
+  }
+})();
 </script>
 </body>
 </html>
