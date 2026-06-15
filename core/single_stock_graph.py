@@ -2,6 +2,7 @@
 
 resolve → industry_context → fetch_data → valuation → quality → growth → ai_thesis → END
 v2: 产业链从 score_store(SQLite) + board_stocks.json 读取; 去掉 yf_data.info 依赖
+v3: 集成 ValueClaw 巴菲特6维评分框架 (valueclaw_bridge)
 """
 
 import json
@@ -12,6 +13,11 @@ import traceback
 from langgraph.graph import StateGraph, END
 
 from .single_stock_state import SingleStockState
+from .valueclaw_bridge import (
+    compute_buffett_score,
+    fetch_buffett_extensions,
+    build_buffett_thesis_section,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -313,10 +319,10 @@ def _get_peers_from_store(code: str, sector: str) -> list[dict]:
 
 
 # ═══════════════════════════════════════
-# Node 3: 拉取财务数据 (Baostock 优先)
+# Node 3: 拉取财务数据 (Baostock 优先) + 巴菲特扩展
 # ═══════════════════════════════════════
 def node_fetch_data(state: SingleStockState) -> dict:
-    """Baostock/yfinance 拉行情+财务。"""
+    """Baostock/yfinance 拉行情+财务，并追加 ValueClaw 巴菲特扩展字段。"""
     code = state.get("resolved_code", "")
     try:
         from .stock_screener import deep_screen_stock
@@ -325,7 +331,28 @@ def node_fetch_data(state: SingleStockState) -> dict:
         passed, reason, yf_data = deep_screen_stock(code, index_hist=index_hist)
         if yf_data is None:
             return {"error": f"无法获取 {code} 数据: {reason}", "current_step": 3}
-        return {"price_data": yf_data, "current_step": 3}
+
+        # ── ValueClaw: 拉取巴菲特框架扩展数据 ──
+        buffett_data = {}
+        try:
+            buffett_ext = fetch_buffett_extensions(code)
+            if buffett_ext:
+                # 合并到 yf_data 中以供后续节点使用
+                yf_data["de_ratio"] = buffett_ext.get("de_ratio")
+                yf_data["owner_earnings"] = buffett_ext.get("owner_earnings")
+                yf_data["revenue_consistency"] = buffett_ext.get("revenue_consistency")
+
+                # 计算巴菲特评分 (数据驱动部分)
+                buffett_data = compute_buffett_score(yf_data)
+                logger.info(f"Buffett score for {code}: {buffett_data.get('score')}/65")
+        except Exception as e:
+            logger.warning(f"Buffett extensions failed for {code}: {e}")
+
+        return {
+            "price_data": yf_data,
+            "buffett_data": buffett_data,
+            "current_step": 3,
+        }
     except Exception as e:
         logger.error(f"fetch_data failed: {traceback.format_exc()}")
         return {"error": f"数据获取失败: {e}", "current_step": 3}
@@ -378,10 +405,10 @@ def node_growth(state: SingleStockState) -> dict:
 
 
 # ═══════════════════════════════════════
-# Node 7: AI 投资论点 + 综合评分
+# Node 7: AI 投资论点 + 综合评分 (含巴菲特框架)
 # ═══════════════════════════════════════
 def node_ai_thesis(state: SingleStockState) -> dict:
-    """DeepSeek 综合研判 + 评分汇总。"""
+    """DeepSeek 综合研判 + 评分汇总 + 巴菲特6维评分。"""
     try:
         from .deepseek_analyzer import _call_deepseek, get_ds_key
         from config import SCRENNER_CONFIG
@@ -398,25 +425,66 @@ def node_ai_thesis(state: SingleStockState) -> dict:
         ds_model = SCRENNER_CONFIG.get("DS_MODEL", "deepseek-chat")
 
         ai_text = ""
+        buffett_moat = 0
+        buffett_mgmt = 0
         if ds_key:
             try:
                 ai_text = _call_deepseek(ds_key, ds_model, prompt, system="你是一位价值投资分析师，用中文200字以内回答。")
+                # 尝试解析 LLM 给出的护城河+管理层评分
+                buffett_moat, buffett_mgmt = _parse_buffett_llm_scores(ai_text)
             except Exception as e:
                 logger.warning(f"DeepSeek call failed: {e}")
                 ai_text = "AI 分析暂时不可用"
         else:
             ai_text = "未配置 DeepSeek API Key"
 
+        # ── 汇总巴菲特评分 ──
+        buffett_data = state.get("buffett_data", {}) or {}
+        buffett_data_score = buffett_data.get("score", 0)
+        buffett_total = buffett_data_score + buffett_moat + buffett_mgmt
+        buffett_breakdown = dict(buffett_data.get("breakdown", {}))
+        buffett_breakdown["durable_moat"] = buffett_moat
+        buffett_breakdown["management_quality"] = buffett_mgmt
+
         return {
             "total_score": total,
             "score_breakdown": {"估值": pe_val, "质量": roe_val, "成长": growth_val},
             "recommendation": rec,
             "ai_thesis": ai_text,
+            "buffett_score": buffett_total,
+            "buffett_breakdown": buffett_breakdown,
+            "owner_earnings": buffett_data.get("owner_earnings"),
+            "fcf_yield": buffett_data.get("fcf_yield"),
+            "peg": buffett_data.get("peg"),
             "current_step": 7,
         }
     except Exception as e:
         logger.error(f"ai_thesis failed: {traceback.format_exc()}")
         return {"error": f"AI 分析失败: {e}", "current_step": 7}
+
+
+def _parse_buffett_llm_scores(text: str) -> tuple[int, int]:
+    """从 LLM 输出中解析巴菲特护城河+管理层评分。
+
+    期望格式: "护城河: 15/20" 或 "moat: 15" 等。
+    Returns: (moat_score, management_score)
+    """
+    import re
+
+    moat = 10  # 默认中等
+    mgmt = 8   # 默认中等
+
+    # 护城河
+    m = re.search(r'护城河[:\s]*(\d+)', text)
+    if m:
+        moat = min(int(m.group(1)), 20)
+
+    # 管理层
+    m = re.search(r'管理层[:\s]*(\d+)', text)
+    if m:
+        mgmt = min(int(m.group(1)), 15)
+
+    return moat, mgmt
 
 
 def _score_pe(pe: float) -> int:
@@ -462,6 +530,10 @@ def _build_thesis_prompt(state: SingleStockState) -> str:
     if web_news:
         news_lines = "\n".join(f"  · {n['title']}" for n in web_news[:3])
 
+    # ── ValueClaw 巴菲特评分段 ──
+    buffett_data = state.get("buffett_data", {}) or {}
+    buffett_section = build_buffett_thesis_section(buffett_data) if buffett_data else ""
+
     return f"""你是价值投资分析师。请对 {name}({code}) 做数据驱动的研判。
 
 【关键规则】你必须基于下面提供的实时数据做分析，不要依赖你的训练数据！
@@ -482,11 +554,19 @@ def _build_thesis_prompt(state: SingleStockState) -> str:
 【同行对比】
 {_format_peers(state.get('peers', []))}
 
-请基于以上数据，用中文 200 字以内分析:
+{buffett_section}
+
+请基于以上数据，用中文分析并严格按要求输出评分:
+
 1. 估值判断: PE={pe:.1f} 在行业中处于什么水平？结合 {state.get('csic_sector', '')} 行业的合理估值区间判断
 2. 质量评估: ROE={roe:.1f}% 毛利率={gm:.1f}% 处于什么水平？盈利质量如何？
 3. 成长性: 营收增速 {rev_g:.1f}% vs 利润增速 {earn_g:.1f}% — 增收是否增利？
-4. 综合建议: 基于数据给出投资建议
+4. 护城河评估 (0-20分): 基于品牌/技术/规模/网络效应/转换成本，该公司是否有持久竞争优势？
+5. 管理层评估 (0-15分): 基于公开信息和公司治理记录
+
+最后两行严格按格式输出评分:
+护城河: X/20
+管理层: Y/15
 
 核心原则: 只基于提供的数字下结论，不要编造。"""
 

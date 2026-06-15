@@ -160,6 +160,12 @@ def run_single_stock_with_queue(initial_state: dict) -> queue.Queue:
                         payload["score_breakdown"] = delta.get("score_breakdown", {})
                         payload["recommendation"] = delta.get("recommendation", "")
                         payload["ai_thesis"] = delta.get("ai_thesis", "")
+                        # ── ValueClaw 巴菲特评分 ──
+                        payload["buffett_score"] = delta.get("buffett_score", 0)
+                        payload["buffett_breakdown"] = delta.get("buffett_breakdown", {})
+                        payload["owner_earnings"] = delta.get("owner_earnings")
+                        payload["fcf_yield"] = delta.get("fcf_yield")
+                        payload["peg"] = delta.get("peg")
 
                     if delta.get("error"):
                         payload["error"] = delta["error"]

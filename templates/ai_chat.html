@@ -273,6 +273,19 @@
   .sdc-metrics { display: flex; gap: 12px; font-size: 11px; color: var(--muted); margin-bottom: 10px; padding: 8px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
   .sdc-thesis { font-size: 12px; line-height: 1.7; color: var(--text); margin-bottom: 8px; }
   .sdc-rec { text-align: center; font-size: 14px; font-weight: 700; padding: 6px; border-radius: 8px; background: rgba(99,102,241,0.15); color: var(--primary); }
+
+  /* ── 巴菲特评分卡片 ── */
+  .buffett-card { margin-top: 10px; border-radius: 10px; border: 1px solid rgba(245,158,11,0.3); background: linear-gradient(135deg, rgba(245,158,11,0.08), rgba(245,158,11,0.02)); padding: 12px; }
+  .buffett-title { font-size: 13px; color: #f59e0b; margin-bottom: 8px; display: flex; align-items: center; gap: 4px; }
+  .buffett-title b { font-size: 16px; }
+  .buffett-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+  .buffett-item { background: rgba(0,0,0,0.15); border-radius: 6px; padding: 6px 8px; text-align: center; }
+  .buffett-item span { display: block; font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+  .buffett-item b { font-size: 15px; color: #f59e0b; }
+  .buffett-item sub { font-size: 10px; color: var(--muted); }
+  .buffett-item.llm { border: 1px dashed rgba(99,102,241,0.4); }
+  .buffett-item.llm b { color: var(--primary); }
+  .buffett-extras { font-size: 11px; color: var(--muted); margin-top: 8px; text-align: center; }
 </style>
 </head>
 <body>
@@ -423,10 +436,40 @@ function addStockCard(d) {
     + '<span>📊 ' + (d.csic_sector||'') + '</span>'
     + '</div>'
     + (d.ai_thesis ? '<div class="sdc-thesis">🤖 ' + md2html(d.ai_thesis) + '</div>' : '')
+    + (d.buffett_score ? _buffett_card(d) : '')
     + (d.recommendation ? '<div class="sdc-rec">' + d.recommendation + '</div>' : '')
     + '</div>';
   document.getElementById('chat').appendChild(el);
   scrollDown();
+}
+
+// ── 巴菲特评分卡片 (ValueClaw 6维框架) ──
+function _buffett_card(d) {
+  const bb = d.buffett_breakdown || {};
+  const score = d.buffett_score || 0;
+  const motd = bb.durable_moat || 0;
+  const mgmt = bb.management_quality || 0;
+
+  let extras = [];
+  if (d.owner_earnings != null) {
+    const oe = d.owner_earnings;
+    extras.push('Owner Earnings: ' + (Math.abs(oe)>=1e8 ? (oe/1e8).toFixed(2)+'亿' : Math.abs(oe)>=1e4 ? (oe/1e4).toFixed(1)+'万' : oe.toFixed(0)));
+  }
+  if (d.fcf_yield != null) extras.push('FCF.Y: ' + d.fcf_yield.toFixed(1) + '%');
+  if (d.peg != null) extras.push('PEG: ' + d.peg.toFixed(2));
+
+  return '<div class="buffett-card">'
+    + '<div class="buffett-title">🏦 巴菲特框架: <b>' + score + '/100</b></div>'
+    + '<div class="buffett-grid">'
+    + '<div class="buffett-item"><span>盈利稳定</span><b>' + (bb.consistent_earnings||0) + '</b><sub>/15</sub></div>'
+    + '<div class="buffett-item"><span>低负债</span><b>' + (bb.low_debt||0) + '</b><sub>/15</sub></div>'
+    + '<div class="buffett-item"><span>高ROE</span><b>' + (bb.high_roe||0) + '</b><sub>/15</sub></div>'
+    + '<div class="buffett-item"><span>合理估值</span><b>' + (bb.reasonable_valuation||0) + '</b><sub>/20</sub></div>'
+    + '<div class="buffett-item llm"><span>🏰 护城河</span><b>' + motd + '</b><sub>/20</sub></div>'
+    + '<div class="buffett-item llm"><span>👔 管理层</span><b>' + mgmt + '</b><sub>/15</sub></div>'
+    + '</div>'
+    + (extras.length ? '<div class="buffett-extras">' + extras.join(' · ') + '</div>' : '')
+    + '</div>';
 }
 
 // ── 思维链时间线 ──

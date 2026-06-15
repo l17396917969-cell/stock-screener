@@ -44,6 +44,13 @@ class SingleStockState(TypedDict, total=False):
     ai_thesis: str
     ai_risks: list[str]
 
+    # ── ValueClaw 巴菲特框架 ──
+    buffett_data: dict        # 巴菲特数据驱动评分结果
+    buffett_score: int        # 巴菲特总分 (0-100)
+    buffett_breakdown: dict   # 6维评分明细
+    owner_earnings: float     # Owner Earnings (所有者收益)
+    de_ratio: float           # 债务/权益比
+
     # ── 输出 ──
     total_score: int
     score_breakdown: dict   # {valuation, quality, growth}
