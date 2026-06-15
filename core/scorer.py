@@ -425,6 +425,16 @@ def calculate_score(code: str, stock_info: dict, yf_data: dict | None) -> dict |
         "total_score": round(weighted_total),
         "report": report,
         "latest_price": current_price,
+        # ── 原始指标 (供缓存/前端展示) ──
+        "pe": pe_ttm if pe_ttm else 0,
+        "pb": pb_val if pb_val else 0,
+        "roe": round(roe * 100, 1) if roe else 0,
+        "roic": round(roic * 100, 1) if roic else 0,
+        "market_cap": market_cap if market_cap else 0,
+        "gross_margin": round(gross_margin * 100, 1) if gross_margin else 0,
+        "dividend_yield": round(dividend_yield * 100, 2) if dividend_yield else 0,
+        "earnings_growth": round(earnings_growth * 100, 1) if earnings_growth else 0,
+        "revenue_growth": round(revenue_growth * 100, 1) if revenue_growth else 0,
     }
 
 
