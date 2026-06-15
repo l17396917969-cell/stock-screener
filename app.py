@@ -873,7 +873,9 @@ def admin_reset_password(user_id):
 @login_required
 def analyze_stream():
     """LangGraph 4 步选股 pipeline，通过 SSE 实时推送每步结果。"""
-    data = request.json or {}
+    data = {}
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
     user_query = data.get("q") or request.args.get("q", "帮我找被低估的A股价值洼地")
 
     # ── 从数据库加载用户的 DeepSeek API Key ──
