@@ -708,9 +708,23 @@ def _get_concept_stocks_fallback(board_name):
         "半导体": "计算机、通信和其他电子设备制造业",
         "元件": "计算机、通信和其他电子设备制造业",
         "消费电子": "计算机、通信和其他电子设备制造业",
+        "光学光电子": "计算机、通信和其他电子设备制造业",
+        "电子化学品": "计算机、通信和其他电子设备制造业",
+        "电子化学品Ⅱ": "计算机、通信和其他电子设备制造业",
+        "集成电路": "计算机、通信和其他电子设备制造业",
+        "芯片": "计算机、通信和其他电子设备制造业",
+        "通信设备": "计算机、通信和其他电子设备制造业",
     }
 
     csic_key = BOARD_TO_CSIC.get(board_name)
+    if not csic_key:
+        # Fuzzy match: strip suffixes like Ⅱ, Ⅲ, and try partial match
+        clean_name = board_name.rstrip("ⅠⅡⅢⅣⅤ").strip()
+        for key, val in BOARD_TO_CSIC.items():
+            if clean_name in key or key in clean_name:
+                csic_key = val
+                logger.info(f"Fuzzy match '{board_name}' → '{key}' ({val})")
+                break
     if not csic_key:
         logger.warning(f"No CSIC mapping for board '{board_name}'")
         return None
