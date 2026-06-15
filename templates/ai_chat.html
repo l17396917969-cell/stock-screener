@@ -574,13 +574,12 @@ async function pollStep2() {
   }, 2000);
 }
 
-// Enter key
-document.getElementById('userInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    sendMessage();
-  }
-});
+// Enter key — mobile + desktop compatible
+const userInput = document.getElementById('userInput');
+const handleSend = e => { e.preventDefault(); sendMessage(); };
+userInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) handleSend(e); });
+userInput.addEventListener('keypress', e => { if (e.key === 'Enter' && !e.shiftKey) handleSend(e); });
+userInput.addEventListener('keyup', e => { if (e.key === 'Enter' && !e.shiftKey) handleSend(e); });
 </script>
 </body>
 </html>
