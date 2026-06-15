@@ -146,6 +146,7 @@ def run_single_stock_with_queue(initial_state: dict) -> queue.Queue:
                         payload["peers"] = delta.get("peers", [])
                         payload["concept_boards"] = delta.get("concept_boards", [])
                         payload["industry_context"] = delta.get("industry_context", "")
+                        payload["web_news"] = delta.get("web_news", [])
                     elif node_name == "valuation":
                         payload["pe"] = delta.get("pe", 0)
                         payload["pb"] = delta.get("pb", 0)

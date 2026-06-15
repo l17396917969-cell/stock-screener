@@ -14,3 +14,4 @@ openai>=1.0.0
 
 langgraph>=0.2.0
 langchain-deepseek>=0.1.0
+duckduckgo_search>=8.0.0

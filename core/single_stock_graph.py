@@ -158,8 +158,8 @@ def _lookup_code(name: str) -> str:
 # Node 2: 产业链上下文 (LLM 实时生成, 不依赖训练数据)
 # ═══════════════════════════════════════
 def node_industry_context(state: SingleStockState) -> dict:
-    """CSIC 行业分类 + LLM 生成产业链分析 (概念板块/竞争对手/行业动态/上下游)。
-    始终调用 LLM, 用实时财务数据做锚点, 避免纯训练数据幻觉。
+    """CSIC 行业分类 + LLM 生成产业链分析 + Web 搜索最新新闻。
+    始终调用 LLM + Web 搜索, 用实时数据做锚点。
     """
     code = state.get("resolved_code", "")
     name = state.get("resolved_name", "")
@@ -168,11 +168,12 @@ def node_industry_context(state: SingleStockState) -> dict:
         local_concepts = _get_concept_boards(code)
         peers = _get_peers_from_store(code, csic)
 
-        # 从 board_stocks 拿到的概念板块只是 CSIC 分类名，没意义
-        # 始终调 LLM 生成真正的概念板块 + 产业链分析
-        industry_context, enriched_concepts = _llm_industry_context(code, name, csic, peers)
+        # Web 搜索最新新闻 (异步友好, 超时保护)
+        web_news = _web_search_safe(code, name)
 
-        # 合并: 本地 CSIC + LLM 概念板块
+        # LLM 生成概念板块 + 产业链分析 (注入 web 新闻)
+        industry_context, enriched_concepts = _llm_industry_context(code, name, csic, peers, web_news)
+
         all_concepts = [csic] + enriched_concepts if enriched_concepts else local_concepts
 
         return {
@@ -180,6 +181,7 @@ def node_industry_context(state: SingleStockState) -> dict:
             "concept_boards": all_concepts,
             "peers": peers,
             "industry_context": industry_context,
+            "web_news": web_news,
             "current_step": 2,
         }
     except Exception as e:
@@ -187,8 +189,18 @@ def node_industry_context(state: SingleStockState) -> dict:
         return {"error": f"产业链分析失败: {e}", "current_step": 2}
 
 
-def _llm_industry_context(code: str, name: str, csic: str, peers: list[dict]) -> tuple[str, list[str]]:
-    """LLM 生成: (产业链分析文本, 概念板块列表)。基于实时数据, 不用训练知识。
+def _web_search_safe(code: str, name: str) -> list[dict]:
+    """带超时保护的 Web 搜索。"""
+    try:
+        from .data_fetcher import web_search_stock
+        return web_search_stock(code, name, max_results=5)
+    except Exception as e:
+        logger.warning(f"Web search failed for {name}: {e}")
+        return []
+
+
+def _llm_industry_context(code: str, name: str, csic: str, peers: list[dict], web_news: list[dict] = None) -> tuple[str, list[str]]:
+    """LLM 生成: (产业链分析文本, 概念板块列表)。基于实时数据 + Web 新闻。
 
     Returns:
         (industry_analysis_text, enriched_concept_boards)
@@ -203,29 +215,36 @@ def _llm_industry_context(code: str, name: str, csic: str, peers: list[dict]) ->
 
         peer_str = "\n".join(f"  {p['name']}({p['code']}) 评分{p['score']}" for p in peers) if peers else "  暂无本地评分同行数据"
 
-        prompt = f"""你是 A 股行业研究员。请分析 {name}({code})，注意：你必须基于我提供的实际财务数据做分析，不要依赖你的训练数据中的过时信息。
+        # Web 新闻摘要
+        news_str = ""
+        if web_news:
+            news_items = "\n".join(f"  · {n['title']}: {n['snippet'][:100]}" for n in web_news[:5])
+            news_str = f"\n【最新新闻 (Web 实时搜索)】\n{news_items}\n"
 
-【实际财务数据 (Baostock 实时获取)】
+        prompt = f"""你是 A 股行业研究员。请分析 {name}({code})，注意：你必须基于我提供的实际数据和最新新闻做分析。
+
+【实际数据】
 - CSIC 行业分类: {csic}
+- 本地同行: {peer_str}{news_str}
 
 请完成两项任务，严格按格式返回 JSON:
 
-{{
+{{{{
   "concepts": ["概念板块1", "概念板块2", ...],
   "analysis": "产业链分析文本"
-}}
+}}}}
 
 要求:
-1. concepts: 列出该股票隶属的 3-6 个概念/主题板块 (如 苹果概念、消费电子、5G、光通信、汽车电子、AI终端 等)，不要包含 CSIC 行业分类名
-2. analysis: 150字以内，结合 CSIC 行业分类 {csic} 分析:
+1. concepts: 结合最新新闻, 列出该股票隶属的 3-6 个概念/主题板块 (如 苹果概念、消费电子、5G、光通信、汽车电子、AI终端 等)，不要包含 CSIC 行业分类名
+2. analysis: 150字以内，结合 CSIC 行业分类 {csic} 和最新新闻分析:
    - 产业链位置 (上游/中游/下游) 及主要产品
    - 列出 3-5 家最直接的 A 股竞争对手 (含代码)
-   - 该行业近期 1-2 个关键趋势
+   - 基于最新新闻提炼 1-2 个关键趋势/事件
 
 只返回 JSON，不要任何其他文字。"""
 
         import traceback as tb
-        logger.info(f"LLM industry context: calling for {name}({code})")
+        logger.info(f"LLM industry context: calling for {name}({code}) with {len(web_news or [])} news items")
         response = _call_deepseek(ds_key, "deepseek-chat", prompt, temperature=0.2, timeout=15)
         logger.info(f"LLM industry response: {response[:300]}")
 
@@ -437,6 +456,12 @@ def _build_thesis_prompt(state: SingleStockState) -> str:
     earn_g = state.get("earnings_cagr_3y", 0)
     concepts = state.get("concept_boards", [])
 
+    # Web 新闻摘要
+    web_news = state.get("web_news", [])
+    news_lines = ""
+    if web_news:
+        news_lines = "\n".join(f"  · {n['title']}" for n in web_news[:3])
+
     return f"""你是价值投资分析师。请对 {name}({code}) 做数据驱动的研判。
 
 【关键规则】你必须基于下面提供的实时数据做分析，不要依赖你的训练数据！
@@ -450,6 +475,9 @@ def _build_thesis_prompt(state: SingleStockState) -> str:
 
 【产业链上下文】
 {industry_ctx if industry_ctx else '见上方概念板块'}
+
+【最新新闻 — Web 实时搜索】
+{news_lines if news_lines else '暂无实时新闻'}
 
 【同行对比】
 {_format_peers(state.get('peers', []))}

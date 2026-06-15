@@ -14,6 +14,8 @@ class SingleStockState(TypedDict, total=False):
     concept_boards: list[str]  # 概念板块
     chain_position: str      # 上游/中游/下游
     peers: list[dict]        # 同行业对比 [{code, name, pe, roe, score}]
+    industry_context: str    # LLM 生成的产业链分析文本
+    web_news: list[dict]     # Web 搜索最新新闻 [{title, url, snippet}]
 
     # ── 财务数据 ──
     price_data: dict         # yfinance 行情

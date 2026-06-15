@@ -504,9 +504,15 @@ function sendMessage() {
         const peerCount = (d.peers||[]).length;
         const detail = d.csic_sector + (peerCount ? ' · ' + peerCount + ' 同行' : '');
         addTimelineStep('industry', 'Step 2', '产业链', detail, 'done');
-        // 如果 LLM 生成了产业链上下文，展示为 AI 消息
+        // LLM 产业链上下文
         if (d.industry_context) {
           addMsg(md2html(d.industry_context), 'ai');
+        }
+        // Web 搜索最新新闻
+        if (d.web_news && d.web_news.length) {
+          const newsHtml = '<div style="font-size:12px;color:var(--muted)">🔍 <b>最新搜索</b><br>' +
+            d.web_news.slice(0,3).map(n => '· <a href="'+n.url+'" target="_blank" style="color:var(--primary)">'+esc(n.title)+'</a>').join('<br>') + '</div>';
+          addMsg(newsHtml, 'ai');
         }
         addTimelineStep('fetch', 'Step 3', '财务数据', 'Baostock…', 'active');
       }

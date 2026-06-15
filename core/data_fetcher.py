@@ -1159,3 +1159,28 @@ def get_stock_data_yf(code: str, index_hist=None) -> dict | None:
         if bs_result is not None:
             return bs_result
     return _get_stock_data_yf_fallback(code_str, index_hist=index_hist)
+
+
+# ── Web 搜索: 实时新闻/公告 ─────────────────────────
+def web_search_stock(code: str, name: str, max_results: int = 5) -> list[dict]:
+    """DuckDuckGo 搜索股票最新新闻/公告。
+
+    Returns:
+        [{"title": "...", "url": "...", "snippet": "..."}, ...]
+    """
+    try:
+        from duckduckgo_search import DDGS
+        query = f"{name} {code} 股票 最新消息"
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
+                results.append({
+                    "title": r.get("title", ""),
+                    "url": r.get("href", ""),
+                    "snippet": r.get("body", "")[:200],
+                })
+        logger.info(f"Web search for {name}: {len(results)} results")
+        return results
+    except Exception as e:
+        logger.warning(f"Web search failed for {name}: {e}")
+        return []
