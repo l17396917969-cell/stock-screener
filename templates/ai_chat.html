@@ -483,9 +483,9 @@ function sendMessage() {
     if (codeMatch) {
       url += 'code=' + codeMatch[1];
     } else {
-      // 提取可能的股票名 (去掉分析/看看等前缀)
-      const name = text.replace(/分析|看看|查一下|怎么看|帮我/g, '').trim();
-      url += 'name=' + encodeURIComponent(name);
+      // 提取可能的股票名 (去掉分析/看看等前缀，把整个输入原文传给后端)
+      const name = text.replace(/^(分析一下|分析|看看|查一下|怎么看|帮我|帮我分析|看一下|解读一下|解读)\s*/g, '').trim();
+      url += 'name=' + encodeURIComponent(text);  // 传原文, 后端做二级清洗+LLM兜底
     }
 
     addTimelineStep('resolve', 'Step 1', '识别股票', '正在解析…', 'active');

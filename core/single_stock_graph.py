@@ -20,27 +20,100 @@ BOARD_CACHE = os.path.join(SHARED_DIR, "board_stocks.json")
 
 
 # ═══════════════════════════════════════
-# Node 1: 解析用户输入
+# Node 1: 解析用户输入 (本地缓存 → LLM 兜底)
 # ═══════════════════════════════════════
 def node_resolve(state: SingleStockState) -> dict:
-    """将 '000858' 或 '茅台' 解析为标准代码+名称。"""
-    user_input = state.get("user_input", "").strip()
+    """将 '000858' 或 '茅台' 或 '分析一下立讯精密' 解析为标准代码+名称。
 
+    三级解析:
+      1. 6位代码匹配 → 本地查名
+      2. 名称本地查 (score_store → board_stocks)
+      3. DeepSeek LLM 兜底 → 从自然语言提取股票名, 映射到代码
+    """
+    user_input = state.get("user_input", "").strip()
+    raw_input = user_input  # 保留原始输入给 LLM
+
+    # ── 去掉常见前缀，提取核心查询 ──
     import re
-    m = re.search(r"\b(\d{6})\b", user_input)
+    cleaned = re.sub(r'^(分析一下|分析|看看|查一下|怎么看|帮我|帮我分析|看一下)\s*', '', user_input).strip()
+
+    # ── 第 1 级: 6 位代码 ──
+    m = re.search(r"\b(\d{6})\b", cleaned)
     if m:
         code = m.group(1)
         name = _lookup_name(code)
         if name:
             return {"resolved_code": code, "resolved_name": name, "current_step": 1}
-        return {"error": f"未找到代码 {code} 对应的股票", "current_step": 1}
+        # 本地无名但代码存在 → 用代码直接拉数据(后续 Baostock 会补名)
+        return {"resolved_code": code, "resolved_name": code, "current_step": 1}
 
-    name = user_input
-    code = _lookup_code(name)
+    # ── 第 2 级: 本地查名称 ──
+    code = _lookup_code(cleaned)
     if code:
-        return {"resolved_code": code, "resolved_name": name, "current_step": 1}
+        return {"resolved_code": code, "resolved_name": cleaned, "current_step": 1}
 
-    return {"error": f"无法识别股票: {user_input}", "current_step": 1}
+    # ── 第 3 级: DeepSeek LLM 兜底 ──
+    result = _llm_resolve_stock(cleaned, raw_input)
+    if result:
+        return {"resolved_code": result[0], "resolved_name": result[1], "current_step": 1}
+
+    return {"error": f"无法识别股票: {cleaned}，请直接输入 6 位代码", "current_step": 1}
+
+
+def _llm_resolve_stock(query: str, raw_input: str = "") -> tuple[str, str] | None:
+    """DeepSeek LLM 把自然语言股票名解析为 (代码, 名称)。
+
+    示例输入: "立讯精密" / "分析一下立讯精密"
+    示例输出: ("002475", "立讯精密")
+    """
+    try:
+        from .deepseek_analyzer import _call_deepseek
+        from config import SCRENNER_CONFIG
+        import os
+
+        ds_key = SCRENNER_CONFIG.get("DS_API_KEY", "") or os.environ.get("DEEPSEEK_API_KEY", "")
+        if not ds_key:
+            logger.warning("LLM resolve: no DeepSeek API key")
+            return None
+
+        prompt = f"""请从以下用户输入中提取 A 股股票名称，并给出其 6 位交易所代码。
+
+用户输入: {raw_input or query}
+查询关键词: {query}
+
+请严格按照以下 JSON 格式返回，不要有任何其他文字:
+{{"code": "6位数字代码", "name": "股票中文名"}}
+
+如果无法确定是哪只股票，返回:
+{{"code": "", "name": ""}}
+
+注意:
+- A 股代码是 6 位数字 (上海 60xxxx, 深圳 00xxxx/30xxxx)
+- 如果用户输入包含"下"字但没有具体股票名，返回空
+- 只返回一只最匹配的股票"""
+
+        response = _call_deepseek(ds_key, "deepseek-chat", prompt, temperature=0.0, timeout=10)
+        logger.info(f"LLM resolve response: {response[:200]}")
+
+        # 从响应中提取 JSON
+        import re as _re
+        match = _re.search(r'\{[^}]+\}', response)
+        if match:
+            data = json.loads(match.group())
+            code = str(data.get("code", "")).strip()
+            name = str(data.get("name", "")).strip()
+            if code and len(code) == 6 and code.isdigit():
+                # 验证: 用 board_stocks.json 确认代码→名称匹配
+                cached_name = _lookup_name(code)
+                if cached_name:
+                    return code, cached_name
+                # 本地缓存没有也接受 (Baostock 会实时查)
+                return code, name or code
+
+    except Exception as e:
+        logger.error(f"LLM resolve failed: {e}")
+
+    return None
 
 
 def _lookup_name(code: str) -> str:
