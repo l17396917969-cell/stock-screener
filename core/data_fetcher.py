@@ -655,19 +655,32 @@ def get_board_stocks(board_name):
 
 
 def _get_concept_stocks_fallback(board_name):
+    """Baostock fallback: query industry constituents by board name."""
     try:
-        with _akshare_semaphore:
-            _akshare_throttle()
-            df = ak.stock_board_concept_cons_em(symbol=board_name)
-        if df is not None and not df.empty:
-            if "代码" in df.columns and "名称" in df.columns:
-                df = df.rename(columns={"代码": "代码", "名称": "名称"})
-            elif "股票代码" in df.columns and "股票简称" in df.columns:
-                df = df.rename(columns={"股票代码": "代码", "股票简称": "名称"})
-            logger.info(f"Concept board '{board_name}' → {len(df)} stocks")
-            return df
+        import baostock as bs
+        bs.login()
+        rs = bs.query_stock_industry()
+        data = rs.get_data()
+        bs.logout()
+
+        if data is None or data.empty:
+            logger.warning(f"Baostock industry data is empty")
+            return None
+
+        matched = data[data["industry"].str.contains(board_name, na=False)]
+        if matched.empty:
+            logger.warning(f"Baostock: no industry matching '{board_name}'")
+            return None
+
+        import pandas as pd
+        result = pd.DataFrame({
+            "代码": [c.split(".")[1] for c in matched["code"]],
+            "名称": matched["code_name"].values,
+        })
+        logger.info(f"Baostock '{board_name}' → {len(result)} stocks")
+        return result
     except Exception as e:
-        logger.warning(f"Concept board '{board_name}' also failed: {e}")
+        logger.warning(f"Baostock fallback also failed: {e}")
     return None
 
 
