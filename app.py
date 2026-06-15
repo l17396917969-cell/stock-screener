@@ -4,7 +4,7 @@ import traceback
 import logging
 import time
 from dotenv import load_dotenv
-from flask import Flask, render_template, jsonify, request, redirect, url_for, flash
+from flask import Flask, render_template, jsonify, request, redirect, url_for, flash, Response, stream_with_context
 from flask_login import login_required, current_user
 from functools import wraps
 from datetime import datetime
@@ -33,6 +33,8 @@ from core.deepseek_analyzer import (
 )
 from core.repos.watchlist_repo import watchlist_repo
 from core.repos.sector_watchlist_repo import sector_watchlist_repo
+from core.screener_state import ScreenerState
+from core.stream import run_graph_with_queue, sse_generator
 from config import SCRENNER_CONFIG
 
 app = Flask(__name__)
@@ -862,6 +864,46 @@ def admin_reset_password(user_id):
         db.commit()
         flash("密码已重置", "success")
     return redirect(url_for("admin_users"))
+
+
+# ═══════════════════════════════════════════════
+# LangGraph SSE 流式分析路由
+# ═══════════════════════════════════════════════
+@app.route("/api/analyze", methods=["POST"])
+@login_required
+def analyze_stream():
+    """LangGraph 4 步选股 pipeline，通过 SSE 实时推送每步结果。"""
+    data = request.json or {}
+    user_query = data.get("q", "帮我找被低估的A股价值洼地")
+
+    initial_state: ScreenerState = {
+        "user_query": user_query,
+        "user_id": current_user.id,
+        "macro_reasoning": "",
+        "sectors": [],
+        "ai_result": {},
+        "candidate_stocks": [],
+        "stock_infos": {},
+        "scored_stocks": [],
+        "batch_progress": {},
+        "top_picks": [],
+        "summary": "",
+        "error": None,
+        "current_step": 0,
+        "is_analyzing": False,
+    }
+
+    event_queue = run_graph_with_queue(initial_state)
+
+    return Response(
+        stream_with_context(sse_generator(event_queue)),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 if __name__ == "__main__":

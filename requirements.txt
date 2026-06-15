@@ -11,3 +11,6 @@ yfinance>=0.2.37
 google-genai>=1.0.0
 baostock>=0.8.9
 openai>=1.0.0
+
+langgraph>=0.2.0
+langchain-deepseek>=0.1.0
