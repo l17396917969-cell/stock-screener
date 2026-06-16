@@ -61,7 +61,7 @@ def score_one_stock(code, name, sector, index_hist=None):
     try:
         from core.stock_screener import deep_screen_stock
         from core.scorer import calculate_score
-        passed, reason, yf_data = deep_screen_stock(code, index_hist=index_hist)
+        passed, reason, yf_data = deep_screen_stock(code, index_hist=index_hist, prefer_baostock=True)
         if yf_data is None:
             return {"code":code,"name":name,"sector":sector,"passed":False,"reason":reason or "数据获取失败","score":0,"scored_at":time.strftime("%Y-%m-%d %H:%M:%S")}
         sr = calculate_score(code, {"name":name,"code":code}, yf_data)
@@ -100,7 +100,7 @@ def main(limit=50, force=False):
 if __name__ == "__main__":
     import argparse
     p = argparse.ArgumentParser()
-    p.add_argument("--limit", type=int, default=50)
+    p.add_argument("--limit", type=int, default=30)
     p.add_argument("--force", action="store_true")
     args = p.parse_args()
     main(limit=args.limit, force=args.force)

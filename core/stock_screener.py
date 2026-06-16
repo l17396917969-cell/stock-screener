@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 import logging
 import time
-from .data_fetcher import get_stock_data_yf
+from .data_fetcher import get_stock_data_yf, _get_stock_data_bs
 from config import SCRENNER_CONFIG
 
 logger = logging.getLogger(__name__)
@@ -35,12 +35,16 @@ def pre_screen_stocks(stock_list: list, stock_infos: dict = None) -> list:
     return candidates
 
 
-def deep_screen_stock(code: str, index_hist=None) -> tuple[bool, str, dict | None]:
+def deep_screen_stock(code: str, index_hist=None, prefer_baostock: bool = False) -> tuple[bool, str, dict | None]:
     """
-    第二层深筛：通过 yfinance 获取财务+技术数据，进行严格排雷。
+    第二层深筛：获取财务+技术数据，进行严格排雷。
+    默认走 yfinance；prefer_baostock=True 时用 Baostock（无 yfinance 回退，适合批量 Cron）。
     返回 (passed: bool, reason: str, data: dict | None)
     """
-    data = get_stock_data_yf(code, index_hist=index_hist)
+    if prefer_baostock:
+        data = _get_stock_data_bs(code, index_hist=index_hist)
+    else:
+        data = get_stock_data_yf(code, index_hist=index_hist)
     if data is None:
         return False, "核心行情/财务数据不足", None
 
